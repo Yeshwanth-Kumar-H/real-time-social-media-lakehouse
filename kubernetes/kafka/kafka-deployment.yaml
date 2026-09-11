@@ -17,7 +17,9 @@ spec:
         tier: streaming
     spec:
       containers:
-        # Zookeeper Container (Co-located for lightweight single-node Minikube deployment)
+        # Architectural Note: Zookeeper is co-located here as a deliberate simplicity choice for
+        # single-node Minikube local testing. Production environments (Kafka 3.3+) standardizes on
+        # KRaft (Kafka Raft metadata mode) without Zookeeper.
         - name: zookeeper
           image: confluentinc/cp-zookeeper:7.4.0
           env:

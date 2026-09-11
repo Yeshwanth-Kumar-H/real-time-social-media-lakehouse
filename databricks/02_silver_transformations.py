@@ -79,6 +79,7 @@ corrupt_records_df = (
         .when(col("parsed.event_id").isNull() & col("parsed.timestamp").isNull(), "missing_event_id_and_timestamp")
         .when(col("parsed.event_id").isNull(), "missing_event_id")
         .when(col("parsed.timestamp").isNull(), "missing_timestamp")
+        # Defensive fallback: Unreachable under current filter criteria, retained for schema evolution
         .otherwise("malformed_payload")
     )
     .select(
