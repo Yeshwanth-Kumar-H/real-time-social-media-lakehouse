@@ -83,4 +83,14 @@
 ### Q3: "Explain how Delta Lake handles concurrency and schema evolution."
 > **Model Answer:**  
 > *- **Optimistic Concurrency Control (OCC):** Delta Lake assumes that multiple concurrent transactions (e.g., streaming writes and ad-hoc batch queries) will not conflict. When a transaction starts, it records the current table version. Before committing to the `_delta_log`, it checks if another transaction committed first. If a non-conflicting write occurred (e.g., writes to disjoint partitions), it succeeds; if a conflict exists, Delta automatically retries the operation on the new snapshot.  
-> - **Schema Enforcement vs. Evolution:** By default, Delta Lake strictly enforces schemas: any incoming stream with missing columns or type mismatches triggers an `AnalysisException` to prevent data corruption. However, when upstream schemas legitimately change, setting `.option("mergeSchema", "true")` enables automated schema evolution, safely adding new nullable columns to the table metadata without rewriting existing Parquet data."*
+> - **Schema Enforcement vs. Evolution:** By default, Delta Lake strictly enforces schemas: any incoming stream with missing columns or type mismatches triggers an `AnalysisException` to prevent data corruption. However, when upstream schemas legitimately change, setting `.option("mergeSchema", "true")` enables automated schema evolution, safely adding new nullable columns to the table metadata without rewriting existing Parquet data.*
+
+---
+
+### Q4: "What happens if you run `dropDuplicates` in Spark Structured Streaming without specifying a watermark on that DataFrame?"
+> **Model Answer:**  
+> *"In Spark Structured Streaming, `dropDuplicates` is a stateful streaming operation. To determine if an incoming event is a duplicate, Spark must store previously observed keys in its StateStore (backed by RocksDB or HDFSBackedStateStore in the executor memory/local disk).  
+> - **Without a watermark:** Spark has no way of knowing when an event is 'too old' to ever appear again. Therefore, it is forced to retain every single `event_id` in the StateStore **indefinitely**. As the stream runs over days or weeks, state size grows linearly with data volume until the executors suffer severe JVM garbage collection pauses, disk exhaustion, or Out-Of-Memory (`OutOfMemoryError: Java heap space`) crashes.  
+> - **With a watermark:** By defining `.withWatermark("event_timestamp", "10 minutes").dropDuplicates(["event_id", "event_timestamp"])`, Spark knows that any event with a timestamp older than `current_watermark` will never be reprocessed. It can safely evict expired keys from the StateStore, bounding the memory footprint to a fixed window of time regardless of how long the stream runs."*
+
+

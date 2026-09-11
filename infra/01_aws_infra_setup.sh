@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # ==============================================================================
 # Script: 01_aws_infra_setup.sh
-# Purpose: Provision Production-Grade AWS VPC, Subnet, Security Groups, IAM,
-#          and EC2 Compute for the Real-Time Streaming Intelligence Platform.
+# Purpose: Provision AWS VPC, Subnet, Security Groups, Scoped IAM, and EC2
+#          for the Real-Time Streaming Intelligence Platform.
 # ==============================================================================
 
 set -euo pipefail
@@ -14,12 +14,14 @@ PROJECT_NAME="social-media-lakehouse"
 AWS_REGION="${AWS_DEFAULT_REGION:-ap-south-2}"
 VPC_CIDR="10.0.0.0/16"
 PUBLIC_SUBNET_CIDR="10.0.1.0/24"
-INSTANCE_TYPE="t3.medium"  # Recommended: 2 vCPU, 4GB RAM for Minikube + Kafka
-KEY_NAME="${KEY_NAME:-bda_key_pair}" # Name of existing EC2 Key Pair in AWS
+INSTANCE_TYPE="t3.medium"
+KEY_NAME="${KEY_NAME:-bda_key_pair}"
+S3_BUCKET_NAME="${S3_BUCKET_NAME:-social-media-lakehouse-${AWS_REGION}}"
 
 echo "=================================================================="
 echo " Starting AWS Infrastructure Provisioning for: ${PROJECT_NAME}"
 echo " Target Region: ${AWS_REGION}"
+echo " Scoped S3 Bucket: ${S3_BUCKET_NAME}"
 echo "=================================================================="
 
 # ------------------------------------------------------------------------------
@@ -35,7 +37,6 @@ VPC_ID=$(aws ec2 create-vpc \
 
 echo "  -> VPC Created: ${VPC_ID}"
 
-# Enable DNS resolution and Hostnames within VPC (Required for K8s & internal endpoints)
 aws ec2 modify-vpc-attribute --vpc-id "${VPC_ID}" --enable-dns-support "{\"Value\":true}" --region "${AWS_REGION}"
 aws ec2 modify-vpc-attribute --vpc-id "${VPC_ID}" --enable-dns-hostnames "{\"Value\":true}" --region "${AWS_REGION}"
 
@@ -58,8 +59,6 @@ SUBNET_ID=$(aws ec2 create-subnet \
   --output text)
 
 echo "  -> Subnet Created: ${SUBNET_ID} in ${AZ}"
-
-# Auto-assign public IP addresses on launch
 aws ec2 modify-subnet-attribute --subnet-id "${SUBNET_ID}" --map-public-ip-on-launch --region "${AWS_REGION}"
 
 # ------------------------------------------------------------------------------
@@ -75,7 +74,6 @@ IGW_ID=$(aws ec2 create-internet-gateway \
 aws ec2 attach-internet-gateway --vpc-id "${VPC_ID}" --internet-gateway-id "${IGW_ID}" --region "${AWS_REGION}"
 echo "  -> IGW Attached: ${IGW_ID}"
 
-echo "  Configuring Public Route Table (0.0.0.0/0 -> IGW)..."
 ROUTE_TABLE_ID=$(aws ec2 create-route-table \
   --vpc-id "${VPC_ID}" \
   --region "${AWS_REGION}" \
@@ -97,7 +95,7 @@ aws ec2 associate-route-table \
 echo "  -> Route Table Associated: ${ROUTE_TABLE_ID}"
 
 # ------------------------------------------------------------------------------
-# Step 4: Stateful Security Group
+# Step 4: Security Group (Internally Consistent Port Allocations)
 # ------------------------------------------------------------------------------
 echo "[4/7] Creating Security Group for Compute & Kafka..."
 SG_ID=$(aws ec2 create-security-group \
@@ -111,8 +109,7 @@ SG_ID=$(aws ec2 create-security-group \
 
 echo "  -> Security Group Created: ${SG_ID}"
 
-# Inbound Rules:
-# 1. SSH (Port 22)
+# 1. Inbound SSH (Port 22)
 aws ec2 authorize-security-group-ingress \
   --group-id "${SG_ID}" \
   --protocol tcp \
@@ -120,24 +117,33 @@ aws ec2 authorize-security-group-ingress \
   --cidr 0.0.0.0/0 \
   --region "${AWS_REGION}" > /dev/null
 
-# 2. Kafka External Listener (Port 9092) - For Databricks Spark Streaming access
+# 2. Inbound Kafka External Listener (Port 9094 - matches kafka-deployment.yaml)
 aws ec2 authorize-security-group-ingress \
   --group-id "${SG_ID}" \
   --protocol tcp \
-  --port 9092 \
+  --port 9094 \
   --cidr 0.0.0.0/0 \
   --region "${AWS_REGION}" > /dev/null
 
-echo "  -> Ingress Rules Configured: Port 22 (SSH), Port 9092 (Kafka)"
+# 3. Inbound NodePort range if accessing NodePort directly (Port 30094)
+aws ec2 authorize-security-group-ingress \
+  --group-id "${SG_ID}" \
+  --protocol tcp \
+  --port 30094 \
+  --cidr 0.0.0.0/0 \
+  --region "${AWS_REGION}" > /dev/null
+
+echo "  -> Ingress Rules Configured: Port 22 (SSH), Port 9094 (Kafka External), Port 30094 (NodePort)"
 
 # ------------------------------------------------------------------------------
-# Step 5: IAM Role & Instance Profile for Secure S3 Access
+# Step 5: Least-Privilege Scoped IAM Role & Instance Profile
+# Replaced managed AmazonS3FullAccess with resource-scoped policy document
 # ------------------------------------------------------------------------------
-echo "[5/7] Creating IAM Role & Instance Profile for EC2 (Least Privilege)..."
+echo "[5/7] Creating Least-Privilege IAM Role & Policy for S3 Lakehouse Access..."
 ROLE_NAME="${PROJECT_NAME}-ec2-role"
 PROFILE_NAME="${PROJECT_NAME}-ec2-profile"
+POLICY_NAME="${PROJECT_NAME}-s3-scoped-policy"
 
-# Trust Policy allowing EC2 service to assume role
 TRUST_POLICY='{
   "Version": "2012-10-17",
   "Statement": [
@@ -152,19 +158,54 @@ TRUST_POLICY='{
 aws iam create-role \
   --role-name "${ROLE_NAME}" \
   --assume-role-policy-document "${TRUST_POLICY}" \
-  --description "Role for ${PROJECT_NAME} EC2 instance" 2>/dev/null || true
+  --description "Least-privilege role for ${PROJECT_NAME} EC2 node" 2>/dev/null || true
 
-# Attach policy granting S3 permissions (for streaming raw checkpoints or dataset sync)
+# Explicitly scoped IAM policy restricting actions exclusively to the project bucket
+SCOPED_S3_POLICY=$(cat << EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowBucketMetadataAndListing",
+      "Effect": "Allow",
+      "Action": [
+        "s3:ListBucket",
+        "s3:GetBucketLocation"
+      ],
+      "Resource": "arn:aws:s3:::${S3_BUCKET_NAME}"
+    },
+    {
+      "Sid": "AllowObjectLakehouseOperations",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject"
+      ],
+      "Resource": "arn:aws:s3:::${S3_BUCKET_NAME}/*"
+    }
+  ]
+}
+EOF
+)
+
+POLICY_ARN=$(aws iam create-policy \
+  --policy-name "${POLICY_NAME}" \
+  --policy-document "${SCOPED_S3_POLICY}" \
+  --description "Scoped access to ${S3_BUCKET_NAME}" \
+  --query 'Policy.Arn' \
+  --output text 2>/dev/null || aws iam list-policies --query "Policies[?PolicyName=='${POLICY_NAME}'].Arn" --output text)
+
 aws iam attach-role-policy \
   --role-name "${ROLE_NAME}" \
-  --policy-arn arn:aws:iam::aws:policy/AmazonS3FullAccess 2>/dev/null || true
+  --policy-arn "${POLICY_ARN}" 2>/dev/null || true
 
 aws iam create-instance-profile --instance-profile-name "${PROFILE_NAME}" 2>/dev/null || true
 aws iam add-role-to-instance-profile \
   --instance-profile-name "${PROFILE_NAME}" \
   --role-name "${ROLE_NAME}" 2>/dev/null || true
 
-echo "  -> IAM Role and Instance Profile Ready: ${PROFILE_NAME}"
+echo "  -> IAM Profile configured with strictly scoped S3 policy: ${POLICY_ARN}"
 
 # ------------------------------------------------------------------------------
 # Step 6: User Data (Automated Provisioning: Docker, Swap, Minikube)
@@ -174,16 +215,14 @@ cat << 'EOF' > "${USER_DATA_FILE}"
 #!/bin/bash
 set -e
 
-# Update and install base packages
 dnf update -y
 dnf install -y git docker htop iptables
 
-# Start and enable Docker
 systemctl start docker
 systemctl enable docker
 usermod -aG docker ec2-user
 
-# Configure 2GB Swap space (Crucial for memory-constrained instances running Minikube/Kafka)
+# Configure 2GB Swap space to prevent OOM Killer on memory-constrained t3.medium
 if [ ! -f /swapfile ]; then
     dd if=/dev/zero of=/swapfile bs=128M count=16
     chmod 600 /swapfile
@@ -202,7 +241,6 @@ curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube-linux-
 install minikube-linux-amd64 /usr/local/bin/minikube
 rm -f minikube-linux-amd64
 
-# Mark initialization complete
 touch /home/ec2-user/.infra_ready
 EOF
 

@@ -31,13 +31,21 @@ else
   echo "  -> No running instances found."
 fi
 
-# 2. Delete IAM Role and Instance Profile
-echo "2. Cleaning up IAM Instance Profile and Role..."
+# 2. Delete IAM Role, Scoped Policy, and Instance Profile
+echo "2. Cleaning up IAM Instance Profile, Custom Policy, and Role..."
 PROFILE_NAME="${PROJECT_NAME}-ec2-profile"
 ROLE_NAME="${PROJECT_NAME}-ec2-role"
+POLICY_NAME="${PROJECT_NAME}-s3-scoped-policy"
 
 aws iam remove-role-from-instance-profile --instance-profile-name "${PROFILE_NAME}" --role-name "${ROLE_NAME}" 2>/dev/null || true
 aws iam delete-instance-profile --instance-profile-name "${PROFILE_NAME}" 2>/dev/null || true
+
+POLICY_ARN=$(aws iam list-policies --query "Policies[?PolicyName=='${POLICY_NAME}'].Arn" --output text 2>/dev/null || true)
+if [ -n "${POLICY_ARN}" ] && [ "${POLICY_ARN}" != "None" ]; then
+  aws iam detach-role-policy --role-name "${ROLE_NAME}" --policy-arn "${POLICY_ARN}" 2>/dev/null || true
+  aws iam delete-policy --policy-arn "${POLICY_ARN}" 2>/dev/null || true
+fi
+
 aws iam detach-role-policy --role-name "${ROLE_NAME}" --policy-arn arn:aws:iam::aws:policy/AmazonS3FullAccess 2>/dev/null || true
 aws iam delete-role --role-name "${ROLE_NAME}" 2>/dev/null || true
 echo "  -> IAM resources deleted."

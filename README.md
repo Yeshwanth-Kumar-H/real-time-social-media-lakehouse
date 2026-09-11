@@ -1,5 +1,5 @@
 # Real-Time Social Media Intelligence Platform
-### *Enterprise Cloud-Native Streaming Lakehouse on AWS, Kubernetes, Kafka, Databricks & Delta Lake*
+### *Cloud-Native Streaming Lakehouse on AWS, Kubernetes, Kafka, Databricks & Delta Lake*
 
 [![AWS](https://img.shields.io/badge/Cloud-AWS-232F3E?logo=amazon-aws&logoColor=white)](https://aws.amazon.com/)
 [![Kubernetes](https://img.shields.io/badge/Orchestration-Kubernetes-326CE5?logo=kubernetes&logoColor=white)](https://kubernetes.io/)
@@ -12,117 +12,150 @@
 
 ---
 
-## 1. Executive Summary & Business Problem
+## 1. Project Overview & Problem Statement
 
-Organizations receive millions of continuous customer interactions, brand mentions, and product discussions across social media every day. Traditional batch ELT pipelines process data hours or days after events occur, rendering marketing and customer support teams reactive rather than proactive.
+Organizations require timely visibility into audience conversations, trending hashtags, and brand sentiment. Relying exclusively on batch processing introduces latency of hours or days, delaying responses to viral events or emerging sentiment spikes.
 
-This project delivers an **end-to-end, production-grade streaming data lakehouse** capable of ingesting high-velocity social media posts, executing sub-second distributed transformations, and persisting business metrics into a **Medallion Data Lake on Amazon S3** with live SQL visualizations on **Databricks Dashboards**.
+This project implements an **end-to-end streaming data lakehouse** that:
+1. Ingests structured social media posts into **Apache Kafka** running inside a containerized **Kubernetes (Minikube)** environment on an AWS EC2 node.
+2. Exposes external Kafka listeners to ingest streams into **Databricks Spark Structured Streaming**.
+3. Transforms, enriches, and validates data across a **Medallion Architecture (Bronze ➔ Silver ➔ Gold)** on **Amazon S3** with **Delta Lake ACID transactions**.
+4. Routes malformed records into a dedicated **Dead-Letter Queue (DLQ)** quarantine table for auditability.
+5. Surfaces aggregated trend metrics on **Databricks SQL Dashboards**.
 
 ---
 
-## 2. End-to-End System Architecture
+## 2. System Architecture
 
 ```mermaid
 flowchart TD
     subgraph AWS_VPC ["Custom AWS VPC (10.0.0.0/16)"]
         subgraph EC2_Node ["EC2 Compute (Amazon Linux 2023 / t3.medium)"]
-            subgraph K8s_Cluster ["Kubernetes (Minikube Engine)"]
-                PROD["Python Social Producer<br/>(Dockerized / Non-Root)"] -->|JSON Payloads| KAFKA["Apache Kafka Broker<br/>Port: 9092 (Internal)"]
+            subgraph K8s_Minikube ["Kubernetes Cluster"]
+                PROD["Python Producer Pod<br/>(Non-Root UID 10001 / Probes)"] -->|Internal :9092| KAFKA["Apache Kafka Broker<br/>Dual Advertised Listeners"]
             end
         end
     end
 
-    subgraph Databricks_Engine ["Databricks Lakehouse (Spark 3.5 Runtime)"]
-        KAFKA -->|External Listener :9094<br/>spark-sql-kafka-0-10| SPARK["Spark Structured Streaming<br/>(Event-Time Watermark)"]
-        SPARK -->|Streaming Ingest| B_DELTA[("Bronze Delta Layer<br/>(Immutable Raw Logs)")]
-        B_DELTA -->|Parse, Clean, Deduplicate| S_DELTA[("Silver Delta Layer<br/>(Cleaned & Enriched)")]
-        S_DELTA -->|Sliding Window Aggregations| G_DELTA[("Gold Delta Layer<br/>(Aggregated Business Marts)")]
+    subgraph Databricks_Engine ["Databricks (Spark 3.5 Structured Streaming)"]
+        KAFKA -->|External :9094<br/>spark-sql-kafka-0-10| B_INGEST["01_kafka_bronze_ingest.py<br/>(Trigger: 5s Micro-batch)"]
+        B_INGEST --> S_TRANS["02_silver_transformations.py<br/>(Watermarked Deduplication)"]
+        S_TRANS -->|Malformed Records| DLQ_TABLE[("Quarantine DLQ Table<br/>(Audit & Alerting)")]
+        S_TRANS --> G_AGGR["03_gold_aggregations.py<br/>(5m Sliding Windows / 10m Watermark)"]
     end
 
     subgraph S3_Storage ["Amazon S3 Object Lakehouse"]
-        B_DELTA -.->|s3://bucket/bronze/| S3_OBJ[("Amazon S3 Data Lake")]
-        S_DELTA -.->|s3://bucket/silver/| S3_OBJ
-        G_DELTA -.->|s3://bucket/gold/| S3_OBJ
+        B_INGEST -.->|Delta Lake Append| B_STORE[("Bronze: Raw Events")]
+        S_TRANS -.->|Delta Lake Append| S_STORE[("Silver: Cleansed Posts")]
+        G_AGGR -.->|Delta Lake Append| G_STORE[("Gold: Business Aggregates")]
     end
 
     subgraph Lakehouse_BI ["Databricks Lakehouse Dashboards"]
-        G_DELTA --> DASH["Real-Time Dashboard<br/>- Top 10 Trending Hashtags<br/>- Top 10 Active Users<br/>- Real-Time Sentiment Gauge"]
+        G_STORE --> DASH["Real-Time Dashboard<br/>- Top 10 Trending Hashtags<br/>- Top 10 Active Users<br/>- Sentiment Breakdown"]
     end
 ```
 
 ---
 
-## 3. Technology Stack & Architectural Justifications
+## 3. Key Technical Decisions & Mechanisms
 
-| Layer | Technology | Why Chosen? (Engineering Justification) |
+| Component | Technical Choice | Specific Mechanism / Implementation |
 | :--- | :--- | :--- |
-| **Cloud & Networking** | AWS (VPC, IGW, Route Tables, Security Groups) | Custom `/16` CIDR isolation prevents corporate network overlap; stateful Security Groups enforce strict least-privilege ingress; IAM instance profiles eliminate static hardcoded credentials. |
-| **Compute & Host** | EC2 + Amazon Linux 2023 + Swap Memory | Configured 2GB swap partition to prevent Linux kernel OOM (Out-of-Memory) kills when running Minikube + Kafka JVM under streaming load. |
-| **Containerization** | Docker (Multi-Stage) | Reduced image size from 600MB+ to 110MB; runs under dedicated non-root UID (`10001`) to comply with CIS Kubernetes security benchmarks. |
-| **Orchestration** | Kubernetes (Minikube) | Self-healing deployments, rolling updates, and declarative ConfigMaps decouple runtime parameters from container code. |
-| **Message Streaming** | Apache Kafka | Immutable distributed commit log with partition keying (`hash(hashtag) % partitions`) to guarantee per-tag in-order delivery; dual advertised listeners enable both in-cluster and external Databricks consumption. |
-| **Distributed Processing** | Databricks (PySpark Structured Streaming) | Industry gold standard for horizontally scalable stream processing with event-time watermarking, micro-batch checkpointing, and exactly-once fault tolerance. |
-| **Storage Architecture** | Amazon S3 + Delta Lake | Medallion architecture (Bronze/Silver/Gold); Delta ACID transaction logs eliminate the S3 partial write problem and enable file compaction via `OPTIMIZE` and `Z-ORDER BY`. |
-| **Analytics & BI** | Databricks SQL Dashboards | Low-latency SQL warehouse queries reading directly from Gold Delta tables without requiring external reporting databases. |
+| **Cloud Networking** | Custom AWS VPC (`10.0.0.0/16`) | Custom public subnet (`10.0.1.0/24`), custom route table with Internet Gateway. Prevents default VPC CIDR collisions and isolates data workloads. |
+| **Security & IAM** | Scoped IAM Role & Instance Profile | IAM policy is explicitly scoped to `arn:aws:s3:::<bucket>` and `arn:aws:s3:::<bucket>/*`. **No managed FullAccess policies used.** |
+| **Security Groups** | Stateful Ingress Rules | Inbound restricted strictly to Port 22 (SSH) and Port 9094 (Kafka External Listener). Port 9092 is kept internal. |
+| **Memory Stability** | Linux 2GB Swap Partition | Provisioned via EC2 user-data to prevent Linux kernel OOM (Out-of-Memory) Killer from terminating Minikube/Kafka processes on memory-constrained nodes. |
+| **Container Security** | Multi-stage Dockerfile & Non-Root Execution | Multi-stage build copies only compiled wheels into runtime image (~110MB). Runs as non-root user `appuser` (UID `10001`) with dropped Linux capabilities. |
+| **Operational Health** | Native Kubernetes Probes | `readinessProbe` verifies process state; `livenessProbe` checks producer heartbeat touchfile `/tmp/producer_heartbeat` to detect and restart hung streaming loops. |
+| **Kafka Ingestion** | Dual Advertised Listeners | Internal listener `kafka-service:9092` for in-cluster producer; external listener `0.0.0.0:9094` (advertised as `<EC2_PUBLIC_IP>:9094`) for cross-cloud Databricks consumption. |
+| **Producer Resilience** | Full Jitter Exponential Backoff | `min(MAX_DELAY, BASE_DELAY * 2 ** attempt) + jitter` prevents thundering-herd reconnect storms when Kafka restarts. |
+| **Partition Keying** | Hash by `primary_hashtag` | Guarantees strict in-order message delivery within each partition for the same hashtag. |
+| **Stateful Deduplication** | Watermarked `dropDuplicates` | **Watermark applied before deduplication**: `.withWatermark("event_timestamp", "10 minutes").dropDuplicates(["event_id", "event_timestamp"])`. Prevents unbounded state store memory growth. |
+| **Data Quality / DLQ** | Dead-Letter Queue (DLQ) Table | Malformed or null-parsed records are routed to `s3://<bucket>/quarantine/corrupt_events` instead of being silently dropped. |
+| **Sliding Aggregations** | Event-Time Sliding Windows | 5-minute sliding windows (1-minute slide) with a 10-minute watermark. Finalized windows are appended to Delta Lake Gold tables. |
 
 ---
 
-## 4. Medallion Data Lake Design
+## 4. Latency Characteristics & Throughput Profile
+
+* **Producer Ingestion Rate:** Synthetic stream generator emits 1 event every ~1.5 seconds per instance.
+* **Micro-Batch Processing:** 
+  - Bronze Ingest: `trigger(processingTime="5 seconds")`.
+  - Silver Transform: `trigger(processingTime="10 seconds")`.
+  - Gold Aggregations: `trigger(processingTime="10 seconds")`.
+* **Window Finalization Latency:** Windowed trend aggregations operate on event time with a 10-minute watermark. A 5-minute window closes and writes to the Gold Delta table once the watermark advances past the window end time (~10–15 minutes of event time progression).
+
+---
+
+## 5. Medallion Lakehouse Directory Layout
 
 ```text
 s3://social-media-lakehouse/
 ├── bronze/
-│   └── social_media_raw/         <-- Append-only raw Kafka strings + ingestion timestamps
+│   └── social_media_raw/         <-- Immutable append-only raw Kafka strings + ingestion metadata
 ├── silver/
-│   └── social_media_posts/       <-- Cleansed, schema-enforced, deduplicated, sentiment-classified
+│   └── social_media_posts/       <-- Cleansed, validated, watermarked, deduplicated events
+├── quarantine/
+│   └── corrupt_events/           <-- Dead-Letter Queue (DLQ) storing unparseable payloads for triage
 ├── gold/
 │   ├── trending_hashtags/        <-- 5-min sliding window: post counts, engagement, sentiment
-│   └── active_users/             <-- 5-min sliding window: top publishing users & interaction reach
-└── checkpoints/                  <-- Write-ahead logs (WAL) ensuring exactly-once recovery
+│   └── active_users/             <-- 5-min sliding window: user post counts and reach
+└── checkpoints/                  <-- Write-ahead logs (WAL) ensuring exactly-once fault recovery
 ```
 
 ---
 
-## 5. Repository Structure
+## 6. Repository Layout & Port Consistency
 
 ```text
 social-media-intelligence-platform/
-├── README.md                                          <-- System documentation & deployment guide
+├── README.md
 ├── infra/
-│   ├── 01_aws_infra_setup.sh                         <-- Production VPC, Subnet, SG, IAM, EC2 launch script
-│   └── teardown.sh                                   <-- Clean resource disposal script
+│   ├── 01_aws_infra_setup.sh     <-- Provisions VPC, SG (Ports 22, 9094), Scoped IAM, EC2
+│   └── teardown.sh               <-- Clean teardown of all cloud resources
 ├── kubernetes/
 │   ├── kafka/
-│   │   ├── kafka-deployment.yaml                     <-- Kafka & Zookeeper with dual advertised listeners
-│   │   ├── kafka-service.yaml                        <-- NodePort service for ports 9092 & 9094
-│   │   └── kafka-setup.sh                            <-- Topic creation & partition management
+│   │   ├── kafka-deployment.yaml <-- Kafka broker with dual listeners (Internal: 9092, External: 9094)
+│   │   ├── kafka-service.yaml    <-- NodePort service exposing 9092 and 9094 (NodePort 30094)
+│   │   └── kafka-setup.sh        <-- Creates topic (3 partitions) & establishes port-forwarding
 │   └── producer/
-│       ├── producer-configmap.yaml                   <-- Dynamic runtime configurations
-│       └── producer-deployment.yaml                  <-- Non-root container with resource limits
+│       ├── producer-configmap.yaml
+│       └── producer-deployment.yaml <-- Includes native K8s liveness and readiness probes
 ├── producer/
-│   ├── Dockerfile                                    <-- Multi-stage non-root container build
+│   ├── Dockerfile                <-- Multi-stage build, non-root user (UID 10001)
 │   ├── requirements.txt
-│   └── producer.py                                   <-- Resilient event stream generator with exponential backoff
+│   └── producer.py               <-- Exponential backoff + jitter, partition keying, heartbeats
 ├── databricks/
-│   ├── 01_kafka_bronze_ingest.py                     <-- Raw Kafka streaming ingest to Bronze Delta
-│   ├── 02_silver_transformations.py                  <-- Schema validation, deduplication, Silver ETL
-│   └── 03_gold_aggregations.py                       <-- Event-time watermarked sliding window aggregations
+│   ├── 01_kafka_bronze_ingest.py <-- Structured streaming raw Kafka ingest to Bronze Delta
+│   ├── 02_silver_transformations.py <-- Watermarked dropDuplicates + Dead-Letter Queue (DLQ)
+│   └── 03_gold_aggregations.py   <-- Event-time watermarked sliding window aggregations
 ├── dashboard/
-│   └── queries.sql                                   <-- Databricks SQL queries powering BI visualizations
+│   └── queries.sql               <-- Databricks SQL queries for live dashboard charts
 └── docs/
-    ├── phase1_aws_networking_interview_guide.md      <-- AWS networking deep-dive & interview Q&As
-    ├── phase2_containerization_kubernetes_interview_guide.md <-- Docker & K8s deep-dive & interview Q&As
-    ├── phase3_kafka_streaming_interview_guide.md     <-- Kafka commit log, partitioning, & lag triage
-    └── phase4_spark_streaming_delta_lake_interview_guide.md <-- Spark internals, watermarking, & Delta Lake
+    ├── phase1_aws_networking_interview_guide.md
+    ├── phase2_containerization_kubernetes_interview_guide.md
+    ├── phase3_kafka_streaming_interview_guide.md
+    └── phase4_spark_streaming_delta_lake_interview_guide.md
 ```
 
 ---
 
-## 6. Quickstart & Deployment Guide
+## 7. Prototype Scope vs. Production Architecture Roadmap
 
-### Prerequisites
-* AWS Account with configured credentials (`aws configure` or IAM user).
-* SSH Key pair in your target region.
+This project is designed as a functional reference architecture. The table below documents the intentional differences between this implementation and a multi-region enterprise production deployment:
+
+| Dimension | Current Prototype Implementation | Production Enterprise Roadmap |
+| :--- | :--- | :--- |
+| **Kubernetes** | Single-node Minikube on EC2 using Docker driver. | Managed Amazon EKS cluster spanning multiple Availability Zones with Karpenter autoscaling and managed node groups. |
+| **Kafka Broker** | Single-node Kafka broker with co-located Zookeeper container. | Amazon Managed Streaming for Apache Kafka (Amazon MSK) or Strimzi Kafka Operator with KRaft mode, 3+ brokers, `replication.factor=3`, and `min.insync.replicas=2`. |
+| **Wire Security** | `PLAINTEXT` listener on port 9094 over internet route. | TLS 1.3 encryption in-transit with mutual authentication (mTLS) and SASL/SCRAM credential validation over AWS PrivateLink or VPC Peering. |
+| **Data Ingestion** | Synthetic producer generating simulated posts every 1.5s. | Production API connectors (e.g. Bluesky Firehose, Reddit Streaming API) with rate-limiting and circuit breakers. |
+| **Observability** | Kubernetes probes + DLQ Delta quarantine table + local stdout logs. | Prometheus + Grafana metrics scraping, Burrow for consumer lag alerting, Datadog tracing, and CloudWatch alarms. |
+| **Lakehouse Hygiene** | Manual query execution. | Scheduled Databricks Workflows running automated `OPTIMIZE table ZORDER BY (event_timestamp)` and `VACUUM table RETAIN 168 HOURS`. |
+
+---
+
+## 8. Deployment Steps
 
 ### Step 1: Provision AWS Infrastructure
 ```bash
@@ -130,20 +163,18 @@ chmod +x infra/01_aws_infra_setup.sh infra/teardown.sh
 ./infra/01_aws_infra_setup.sh
 ```
 
-### Step 2: Deploy Streaming Pipeline on EC2
-SSH into the provisioned EC2 instance:
+### Step 2: Deploy Streaming Components on EC2
 ```bash
 ssh -i /path/to/key.pem ec2-user@<EC2_PUBLIC_IP>
-```
-Start Minikube and apply Kubernetes manifests:
-```bash
+
+# Start Minikube
 minikube start --driver=docker
 
-# Deploy Kafka Broker with Dual Listeners
+# Deploy Kafka with Dual Listeners
 kubectl apply -f kubernetes/kafka/kafka-deployment.yaml
 kubectl apply -f kubernetes/kafka/kafka-service.yaml
 
-# Configure Topic
+# Create topic and activate port forwarding for port 9094
 chmod +x kubernetes/kafka/kafka-setup.sh
 ./kubernetes/kafka/kafka-setup.sh
 
@@ -155,24 +186,11 @@ kubectl apply -f kubernetes/producer/producer-deployment.yaml
 ```
 
 ### Step 3: Run Databricks Structured Streaming
-1. Import `databricks/01_kafka_bronze_ingest.py`, `02_silver_transformations.py`, and `03_gold_aggregations.py` into your Databricks workspace.
-2. In your cluster configuration, attach library: `org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0`.
-3. Set Spark config or widget `pipeline.kafka.bootstrap` to `<EC2_PUBLIC_IP>:9094`.
-4. Run all three streaming notebooks.
+1. Import `databricks/01_kafka_bronze_ingest.py`, `02_silver_transformations.py`, and `03_gold_aggregations.py` into Databricks.
+2. Ensure cluster has `org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0` attached.
+3. Configure `pipeline.kafka.bootstrap` to `<EC2_PUBLIC_IP>:9094`.
+4. Run all three streaming jobs in sequence.
 
-### Step 4: Open Databricks SQL Dashboard
-1. Open the Databricks SQL Editor.
-2. Execute the queries in `dashboard/queries.sql`.
-3. Build the two bar charts: **Top 10 Trending Hashtags** and **Top 10 Most Active Users** (matching your target UI).
-
----
-
-## 7. Resume Highlight (Copy-Paste Ready)
-
-**Real-Time Social Media Intelligence Platform**  
-*AWS | Apache Kafka | Docker | Kubernetes | Databricks | PySpark | Amazon S3 | Delta Lake*
-* Architected and deployed an enterprise streaming data platform on AWS using Docker, Kubernetes, Apache Kafka, Databricks, and Amazon S3, processing continuous social-media event streams with sub-second latency.
-* Engineered a resilient Python event producer running on Kubernetes under a non-root security context with exponential backoff and partition-key hashing to guarantee per-tag in-order delivery.
-* Configured Kafka dual advertised listeners to bridge private Kubernetes pod networking with external cross-cloud Databricks Spark Structured Streaming clusters.
-* Implemented an end-to-end Medallion Architecture (Bronze $\rightarrow$ Silver $\rightarrow$ Gold) using PySpark and Delta Lake on S3, applying event-time watermarking to handle out-of-order data and streaming deduplication.
-* Built real-time Databricks SQL dashboards visualizing top trending hashtags, user interaction metrics, and sentiment distribution for executive decision-making.
+### Step 4: Publish Lakehouse SQL Dashboard
+1. Execute `dashboard/queries.sql` in Databricks SQL Editor.
+2. Build the bar charts for **Top 10 Trending Hashtags** and **Top 10 Active Users**.

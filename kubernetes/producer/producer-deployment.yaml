@@ -46,4 +46,30 @@ spec:
             capabilities:
               drop:
                 - ALL
+          # Native Kubernetes Probes (K8s ignores Dockerfile HEALTHCHECK instructions)
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - "ps aux | grep [p]roducer.py"
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  # Verify the producer loop wrote a heartbeat within the last 60 seconds
+                  LAST_MOD=$(stat -c %Y /tmp/producer_heartbeat 2>/dev/null || stat -f %m /tmp/producer_heartbeat 2>/dev/null || echo 0)
+                  NOW=$(date +%s)
+                  DIFF=$((NOW - LAST_MOD))
+                  if [ "$DIFF" -lt 60 ]; then exit 0; else exit 1; fi
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
       restartPolicy: Always
