@@ -1,0 +1,84 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka
+  labels:
+    app: kafka
+    tier: streaming
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kafka
+  template:
+    metadata:
+      labels:
+        app: kafka
+        tier: streaming
+    spec:
+      containers:
+        # Zookeeper Container (Co-located for lightweight single-node Minikube deployment)
+        - name: zookeeper
+          image: confluentinc/cp-zookeeper:7.4.0
+          env:
+            - name: ZOOKEEPER_CLIENT_PORT
+              value: "2181"
+            - name: ZOOKEEPER_TICK_TIME
+              value: "2000"
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          ports:
+            - containerPort: 2181
+              name: zookeeper
+
+        # Apache Kafka Broker Container with Dual Advertised Listeners
+        - name: kafka-broker
+          image: confluentinc/cp-kafka:7.4.0
+          ports:
+            - containerPort: 9092
+              name: kafka-internal
+            - containerPort: 9094
+              name: kafka-external
+          env:
+            - name: KAFKA_BROKER_ID
+              value: "1"
+            - name: KAFKA_ZOOKEEPER_CONNECT
+              value: "localhost:2181"
+            # Dual Listeners:
+            # - INTERNAL (9092): Accessible within Minikube cluster (used by Python Producer)
+            # - EXTERNAL (9094): Accessible outside EC2 (used by Databricks Spark Structured Streaming)
+            - name: KAFKA_LISTENERS
+              value: "INTERNAL://0.0.0.0:9092,EXTERNAL://0.0.0.0:9094"
+            - name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
+              value: "INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT"
+            - name: KAFKA_INTER_BROKER_LISTENER_NAME
+              value: "INTERNAL"
+            # Note: Replace <EC2_PUBLIC_IP> with your EC2 instance Public IP
+            - name: KAFKA_ADVERTISED_LISTENERS
+              value: "INTERNAL://kafka-service:9092,EXTERNAL://__REPLACE_EC2_PUBLIC_IP__:9094"
+            - name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
+              value: "1"
+            - name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR
+              value: "1"
+            - name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR
+              value: "1"
+            - name: KAFKA_AUTO_CREATE_TOPICS_ENABLE
+              value: "true"
+            - name: KAFKA_LOG_RETENTION_HOURS
+              value: "24"
+            - name: KAFKA_LOG_RETENTION_BYTES
+              value: "1073741824" # 1 GB
+            - name: KAFKA_HEAP_OPTS
+              value: "-Xms512M -Xmx768M"
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "768Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1536Mi"
