@@ -117,15 +117,7 @@ aws ec2 authorize-security-group-ingress \
   --cidr 0.0.0.0/0 \
   --region "${AWS_REGION}" > /dev/null
 
-# 2. Inbound Kafka External Listener (Port 9094 - matches kafka-deployment.yaml)
-aws ec2 authorize-security-group-ingress \
-  --group-id "${SG_ID}" \
-  --protocol tcp \
-  --port 9094 \
-  --cidr 0.0.0.0/0 \
-  --region "${AWS_REGION}" > /dev/null
-
-# 3. Inbound NodePort range if accessing NodePort directly (Port 30094)
+# 2. Inbound Kafka External Listener via Kubernetes NodePort (Port 30094)
 aws ec2 authorize-security-group-ingress \
   --group-id "${SG_ID}" \
   --protocol tcp \
@@ -133,7 +125,7 @@ aws ec2 authorize-security-group-ingress \
   --cidr 0.0.0.0/0 \
   --region "${AWS_REGION}" > /dev/null
 
-echo "  -> Ingress Rules Configured: Port 22 (SSH), Port 9094 (Kafka External), Port 30094 (NodePort)"
+echo "  -> Ingress Rules Configured: Port 22 (SSH), Port 30094 (Kafka NodePort)"
 
 # ------------------------------------------------------------------------------
 # Step 5: Least-Privilege Scoped IAM Role & Instance Profile

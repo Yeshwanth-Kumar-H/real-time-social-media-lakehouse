@@ -120,9 +120,9 @@ def create_kafka_producer(servers: str) -> KafkaProducer:
             retries += 1
             if retries >= MAX_RETRIES:
                 break
-            # True exponential backoff with full jitter to avoid thundering herds
+            # Full Jitter exponential backoff to avoid thundering herds: sleep = uniform(0, min(MAX_DELAY, BASE_DELAY * 2 ** attempt))
             calculated_backoff = min(MAX_RETRY_DELAY_SEC, BASE_RETRY_DELAY_SEC * (2 ** retries))
-            jittered_sleep = random.uniform(BASE_RETRY_DELAY_SEC, calculated_backoff)
+            jittered_sleep = random.uniform(0, calculated_backoff)
             logger.warning(f"Broker not available. Backing off for {jittered_sleep:.2f}s before retry {retries + 1}...")
             time.sleep(jittered_sleep)
 

@@ -25,10 +25,10 @@
 * **The Solution:** Dual Advertised Listeners:
   ```yaml
   KAFKA_LISTENERS: "INTERNAL://0.0.0.0:9092,EXTERNAL://0.0.0.0:9094"
-  KAFKA_ADVERTISED_LISTENERS: "INTERNAL://kafka-service:9092,EXTERNAL://<EC2_PUBLIC_IP>:9094"
+  KAFKA_ADVERTISED_LISTENERS: "INTERNAL://kafka-service:9092,EXTERNAL://<EC2_PUBLIC_IP>:30094"
   ```
   - In-cluster pods talk over `INTERNAL` on port `9092`.
-  - External Spark clusters connect over `EXTERNAL` on port `9094`.
+  - External Spark clusters connect over `EXTERNAL` via Kubernetes NodePort `30094`.
 
 ---
 

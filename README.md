@@ -38,7 +38,7 @@ flowchart TD
     end
 
     subgraph Databricks_Engine ["Databricks (Spark 3.5 Structured Streaming)"]
-        KAFKA -->|External :9094<br/>spark-sql-kafka-0-10| B_INGEST["01_kafka_bronze_ingest.py<br/>(Trigger: 5s Micro-batch)"]
+        KAFKA -->|External NodePort :30094<br/>spark-sql-kafka-0-10| B_INGEST["01_kafka_bronze_ingest.py<br/>(Trigger: 5s Micro-batch)"]
         B_INGEST --> S_TRANS["02_silver_transformations.py<br/>(Watermarked Deduplication)"]
         S_TRANS -->|Malformed Records| DLQ_TABLE[("Quarantine DLQ Table<br/>(Audit & Alerting)")]
         S_TRANS --> G_AGGR["03_gold_aggregations.py<br/>(5m Sliding Windows / 10m Watermark)"]
@@ -63,11 +63,11 @@ flowchart TD
 | :--- | :--- | :--- |
 | **Cloud Networking** | Custom AWS VPC (`10.0.0.0/16`) | Custom public subnet (`10.0.1.0/24`), custom route table with Internet Gateway. Prevents default VPC CIDR collisions and isolates data workloads. |
 | **Security & IAM** | Scoped IAM Role & Instance Profile | IAM policy is explicitly scoped to `arn:aws:s3:::<bucket>` and `arn:aws:s3:::<bucket>/*`. **No managed FullAccess policies used.** |
-| **Security Groups** | Stateful Ingress Rules | Inbound restricted strictly to Port 22 (SSH) and Port 9094 (Kafka External Listener). Port 9092 is kept internal. |
+| **Security Groups** | Stateful Ingress Rules | Inbound restricted strictly to Port 22 (SSH) and Port 30094 (Kafka External NodePort). Port 9092 is kept internal. |
 | **Memory Stability** | Linux 2GB Swap Partition | Provisioned via EC2 user-data to prevent Linux kernel OOM (Out-of-Memory) Killer from terminating Minikube/Kafka processes on memory-constrained nodes. |
 | **Container Security** | Multi-stage Dockerfile & Non-Root Execution | Multi-stage build copies only compiled wheels into runtime image (~110MB). Runs as non-root user `appuser` (UID `10001`) with dropped Linux capabilities. |
 | **Operational Health** | Native Kubernetes Probes | `readinessProbe` verifies process state; `livenessProbe` checks producer heartbeat touchfile `/tmp/producer_heartbeat` to detect and restart hung streaming loops. |
-| **Kafka Ingestion** | Dual Advertised Listeners | Internal listener `kafka-service:9092` for in-cluster producer; external listener `0.0.0.0:9094` (advertised as `<EC2_PUBLIC_IP>:9094`) for cross-cloud Databricks consumption. |
+| **Kafka Ingestion** | Dual Advertised Listeners | Internal listener `kafka-service:9092` for in-cluster producer; external listener `0.0.0.0:9094` exposed via NodePort 30094 (advertised as `<EC2_PUBLIC_IP>:30094`) for cross-cloud Databricks consumption. |
 | **Producer Resilience** | Full Jitter Exponential Backoff | `min(MAX_DELAY, BASE_DELAY * 2 ** attempt) + jitter` prevents thundering-herd reconnect storms when Kafka restarts. |
 | **Partition Keying** | Hash by `primary_hashtag` | Guarantees strict in-order message delivery within each partition for the same hashtag. |
 | **Stateful Deduplication** | Watermarked `dropDuplicates` | **Watermark applied before deduplication**: `.withWatermark("event_timestamp", "10 minutes").dropDuplicates(["event_id", "event_timestamp"])`. Prevents unbounded state store memory growth. |
@@ -111,13 +111,13 @@ s3://social-media-lakehouse/
 social-media-intelligence-platform/
 ├── README.md
 ├── infra/
-│   ├── 01_aws_infra_setup.sh     <-- Provisions VPC, SG (Ports 22, 9094), Scoped IAM, EC2
+│   ├── 01_aws_infra_setup.sh     <-- Provisions VPC, SG (Ports 22, 30094), Scoped IAM, EC2
 │   └── teardown.sh               <-- Clean teardown of all cloud resources
 ├── kubernetes/
 │   ├── kafka/
-│   │   ├── kafka-deployment.yaml <-- Kafka broker with dual listeners (Internal: 9092, External: 9094)
+│   │   ├── kafka-deployment.yaml <-- Kafka broker with dual listeners (Internal: 9092, External: 30094)
 │   │   ├── kafka-service.yaml    <-- NodePort service exposing 9092 and 9094 (NodePort 30094)
-│   │   └── kafka-setup.sh        <-- Creates topic (3 partitions) & establishes port-forwarding
+│   │   └── kafka-setup.sh        <-- Creates topic (3 partitions) & validates broker readiness
 │   └── producer/
 │       ├── producer-configmap.yaml
 │       └── producer-deployment.yaml <-- Includes native K8s liveness and readiness probes
@@ -148,7 +148,7 @@ This project is designed as a functional reference architecture. The table below
 | :--- | :--- | :--- |
 | **Kubernetes** | Single-node Minikube on EC2 using Docker driver. | Managed Amazon EKS cluster spanning multiple Availability Zones with Karpenter autoscaling and managed node groups. |
 | **Kafka Broker** | Single-node Kafka broker with co-located Zookeeper container. | Amazon Managed Streaming for Apache Kafka (Amazon MSK) or Strimzi Kafka Operator with KRaft mode, 3+ brokers, `replication.factor=3`, and `min.insync.replicas=2`. |
-| **Wire Security** | `PLAINTEXT` listener on port 9094 over internet route. | TLS 1.3 encryption in-transit with mutual authentication (mTLS) and SASL/SCRAM credential validation over AWS PrivateLink or VPC Peering. |
+| **Wire Security** | `PLAINTEXT` listener on NodePort 30094 over internet route. | TLS 1.3 encryption in-transit with mutual authentication (mTLS) and SASL/SCRAM credential validation over AWS PrivateLink or VPC Peering. |
 | **Data Ingestion** | Synthetic producer generating simulated posts every 1.5s. | Production API connectors (e.g. Bluesky Firehose, Reddit Streaming API) with rate-limiting and circuit breakers. |
 | **Observability** | Kubernetes probes + DLQ Delta quarantine table + local stdout logs. | Prometheus + Grafana metrics scraping, Burrow for consumer lag alerting, Datadog tracing, and CloudWatch alarms. |
 | **Lakehouse Hygiene** | Manual query execution. | Scheduled Databricks Workflows running automated `OPTIMIZE table ZORDER BY (event_timestamp)` and `VACUUM table RETAIN 168 HOURS`. |
@@ -174,7 +174,7 @@ minikube start --driver=docker
 kubectl apply -f kubernetes/kafka/kafka-deployment.yaml
 kubectl apply -f kubernetes/kafka/kafka-service.yaml
 
-# Create topic and activate port forwarding for port 9094
+# Create topic and verify broker readiness
 chmod +x kubernetes/kafka/kafka-setup.sh
 ./kubernetes/kafka/kafka-setup.sh
 
@@ -188,7 +188,7 @@ kubectl apply -f kubernetes/producer/producer-deployment.yaml
 ### Step 3: Run Databricks Structured Streaming
 1. Import `databricks/01_kafka_bronze_ingest.py`, `02_silver_transformations.py`, and `03_gold_aggregations.py` into Databricks.
 2. Ensure cluster has `org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0` attached.
-3. Configure `pipeline.kafka.bootstrap` to `<EC2_PUBLIC_IP>:9094`.
+3. Configure `pipeline.kafka.bootstrap` to `<EC2_PUBLIC_IP>:30094`.
 4. Run all three streaming jobs in sequence.
 
 ### Step 4: Publish Lakehouse SQL Dashboard

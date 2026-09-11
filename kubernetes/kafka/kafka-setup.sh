@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # ==============================================================================
 # Script: kafka-setup.sh
-# Purpose: Initialize Kafka topic with partitioning, verify broker state,
-#          and expose external listener on EC2 port 9094 for Databricks.
+# Purpose: Initialize Kafka topic with partitioning and verify broker readiness.
 # ==============================================================================
 
 set -euo pipefail
@@ -45,15 +44,6 @@ else
     /bin/kafka-topics --bootstrap-server localhost:9092 --describe --topic "${TOPIC_NAME}"
 fi
 
-# 3. Ensure Port 9094 is forwarded to EC2 host interface for Databricks ingress
-echo "Ensuring port-forwarding for external listener (Port 9094)..."
-if ! pgrep -f "port-forward.*9094:9094" > /dev/null; then
-  nohup kubectl port-forward --address 0.0.0.0 service/kafka-service 9094:9094 > /tmp/kafka-port-forward.log 2>&1 &
-  echo "  -> Port-forwarding active on 0.0.0.0:9094 (background PID: $!)"
-else
-  echo "  -> Port-forwarding already active on 0.0.0.0:9094"
-fi
-
 echo "=================================================================="
-echo " Kafka Broker Ready. Databricks can connect via <EC2_PUBLIC_IP>:9094"
+echo " Kafka Broker Ready. External clients connect via <EC2_PUBLIC_IP>:30094"
 echo "=================================================================="

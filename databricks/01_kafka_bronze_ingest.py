@@ -16,7 +16,7 @@ spark.sparkContext.setLogLevel("WARN")
 
 # 2. Pipeline Configuration Parameters
 # In Databricks, these can be parameterized using dbutils.widgets
-KAFKA_BOOTSTRAP_SERVERS = spark.conf.get("pipeline.kafka.bootstrap", "<EC2_PUBLIC_IP>:9094")
+KAFKA_BOOTSTRAP_SERVERS = spark.conf.get("pipeline.kafka.bootstrap", "<EC2_PUBLIC_IP>:30094")
 KAFKA_TOPIC = spark.conf.get("pipeline.kafka.topic", "social-media-posts")
 S3_BUCKET = spark.conf.get("pipeline.s3.bucket", "s3://social-media-lakehouse")
 

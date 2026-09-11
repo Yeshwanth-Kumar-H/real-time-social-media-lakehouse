@@ -73,9 +73,18 @@ parsed_stream = bronze_stream.withColumn(
 corrupt_records_df = (
     parsed_stream
     .filter(col("parsed.event_id").isNull() | col("parsed.timestamp").isNull())
+    .withColumn(
+        "rejection_reason",
+        when(col("parsed").isNull(), "unparseable_json_payload")
+        .when(col("parsed.event_id").isNull() & col("parsed.timestamp").isNull(), "missing_event_id_and_timestamp")
+        .when(col("parsed.event_id").isNull(), "missing_event_id")
+        .when(col("parsed.timestamp").isNull(), "missing_timestamp")
+        .otherwise("malformed_payload")
+    )
     .select(
         col("kafka_key"),
         col("raw_payload"),
+        col("rejection_reason"),
         col("kafka_topic"),
         col("kafka_partition"),
         col("kafka_offset"),

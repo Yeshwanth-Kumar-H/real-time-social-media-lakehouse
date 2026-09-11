@@ -51,16 +51,16 @@ spec:
               value: "localhost:2181"
             # Dual Listeners:
             # - INTERNAL (9092): Accessible within Minikube cluster (used by Python Producer)
-            # - EXTERNAL (9094): Accessible outside EC2 (used by Databricks Spark Structured Streaming)
+            # - EXTERNAL (30094): Exposed via NodePort 30094 on EC2 (used by Databricks Spark Streaming)
             - name: KAFKA_LISTENERS
               value: "INTERNAL://0.0.0.0:9092,EXTERNAL://0.0.0.0:9094"
             - name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
               value: "INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT"
             - name: KAFKA_INTER_BROKER_LISTENER_NAME
               value: "INTERNAL"
-            # Note: Replace <EC2_PUBLIC_IP> with your EC2 instance Public IP
+            # Note: Replace __REPLACE_EC2_PUBLIC_IP__ with your EC2 instance Public IP
             - name: KAFKA_ADVERTISED_LISTENERS
-              value: "INTERNAL://kafka-service:9092,EXTERNAL://__REPLACE_EC2_PUBLIC_IP__:9094"
+              value: "INTERNAL://kafka-service:9092,EXTERNAL://__REPLACE_EC2_PUBLIC_IP__:30094"
             - name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
               value: "1"
             - name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR
