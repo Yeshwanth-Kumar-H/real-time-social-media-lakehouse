@@ -8,6 +8,9 @@ metadata:
 data:
   KAFKA_BOOTSTRAP_SERVERS: "kafka-service:9092"
   KAFKA_TOPIC: "social-media-posts"
-  MESSAGE_INTERVAL_SEC: "1.5"
-  MAX_RETRIES: "20"
-  RETRY_DELAY_SEC: "5"
+  DATA_SOURCE: "reddit"
+  REDDIT_SUBREDDITS: "technology+datascience+programming+aws+kubernetes+artificial"
+  POLL_INTERVAL_SEC: "3.0"
+  MAX_RETRIES: "10"
+  BASE_RETRY_DELAY_SEC: "1.0"
+  MAX_RETRY_DELAY_SEC: "30.0"
