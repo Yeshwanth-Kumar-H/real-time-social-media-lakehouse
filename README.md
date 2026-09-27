@@ -1,95 +1,56 @@
-# Real-Time Social Media Intelligence Lakehouse Platform
-### *Philippine Election 2025 Trends — Enterprise Streaming Architecture*
+# Real-Time Social Media Streaming Lakehouse
 
-[![Apache Kafka](https://img.shields.io/badge/Streaming-Apache%20Kafka%203.4-black?logo=apachekafka)](https://kafka.apache.org/)
-[![Databricks](https://img.shields.io/badge/Compute-Databricks%20Serverless-FF3621?logo=databricks)](https://databricks.com/)
-[![Delta Lake](https://img.shields.io/badge/Storage-Delta%20Lake%203.0-00ADD8?logo=delta)](https://delta.io/)
-[![AWS](https://img.shields.io/badge/Cloud-Amazon%20Web%20Services-232F3E?logo=amazon-aws)](https://aws.amazon.com/)
-[![Kubernetes](https://img.shields.io/badge/Orchestration-Kubernetes-326CE5?logo=kubernetes)](https://kubernetes.io/)
+A hands-on data engineering project exploring real-time streaming ingestion, transformation, and lakehouse storage using **Apache Kafka**, **Apache Spark Structured Streaming**, and **Delta Lake** on **Databricks**.
 
----
-
-## 1. Executive Summary & Business Objective
-
-During high-velocity national events (such as the **Philippine General Election 2025**), social media conversations evolve rapidly across platforms. Traditional batch ETL architectures (running overnight) deliver intelligence 12–24 hours too late.
-
-This project delivers an **end-to-end, enterprise-grade streaming Lakehouse platform** designed to ingest, process, and analyze social media trends in real time. It captures tweet bursts, cleanses and deduplicates records with sub-second latency, maintains an append-only audit trail in Delta Lake, and powers an **Executive BI Dashboard** displaying trending hashtags, sentiment shifts, and influencer engagement.
-
-### Verified Benchmark Performance:
-- **Streaming Ingestion Velocity:** **3,057 messages/second** (217,640 tweets ingested in 71.2 seconds).
-- **Scale Tested:** **299,247 live tweets** processed across 3 Kafka partitions.
-- **Engagement Analyzed:** **13,517,442 user interactions** (likes, retweets, replies).
-- **Top Dominant Trend:** `#halalan2025` (>200,000 posts, 8M+ engagement), followed by `#pbbcollab5theevictionnight` and `#sb19`.
-- **Pipeline Orchestration:** 3-stage multi-hop DAG (`Bronze ➔ Silver ➔ Gold`) executed with zero errors in **2m 50s**.
+[![Apache Kafka](https://img.shields.io/badge/Streaming-Apache%20Kafka-black?logo=apachekafka)](https://kafka.apache.org/)
+[![Apache Spark](https://img.shields.io/badge/Engine-Apache%20Spark-E25A1C?logo=apachespark)](https://spark.apache.org/)
+[![Databricks](https://img.shields.io/badge/Platform-Databricks-FF3621?logo=databricks)](https://databricks.com/)
+[![Delta Lake](https://img.shields.io/badge/Storage-Delta%20Lake-00ADD8?logo=delta)](https://delta.io/)
+[![AWS](https://img.shields.io/badge/Cloud-AWS-232F3E?logo=amazon-aws)](https://aws.amazon.com/)
 
 ---
 
-## 2. Visual Platform Showcase
+## 1. Project Overview
 
-### 📊 Executive Real-Time BI Dashboard
-> **Live Databricks Lakeview Dashboard:** Displays real-time Philippine Election 2025 intelligence, **299,247 analyzed posts**, **13,517,442 user interactions**, and horizontal ranking charts for hashtag velocity and citizen engagement.
+During major national events such as elections, public social media activity surges rapidly. Ingesting and analyzing these discussions in real time requires a distributed streaming architecture rather than traditional daily batch jobs.
 
-![Philippine Election 2025 Live Analytics Dashboard](images/databricks_executive_dashboard.png)
+This project was built to gain practical, hands-on experience building an end-to-end streaming data pipeline. It simulates a live stream of social media posts discussing the **2025 Philippine Elections**, ingests them through Apache Kafka, processes them using PySpark Structured Streaming, stores them in a Delta Lake Medallion architecture (Bronze ➔ Silver ➔ Gold), and surfaces real-time metrics in a Databricks Lakeview dashboard.
 
----
-
-### ⚡ Automated Multi-Hop Orchestration DAG (Databricks Workflows)
-> **Production Multi-Hop Pipeline:** Automated execution of `Bronze_Ingestion` ➔ `Silver_Transformation` ➔ `Gold_Aggregation` on Databricks Serverless compute with sequential task dependencies and zero pipeline latency.
-
-![Databricks Workflows Automated Pipeline DAG](images/databricks_workflows_dag.png)
+### Key Project Metrics & Highlights:
+- **Simulated Ingestion Rate:** Ingested a dataset of ~217,000 posts with throughput reaching ~3,000 messages/sec into Kafka.
+- **Partitioned Topic:** Streamed across 3 Kafka partitions using a round-robin producer with dynamic timestamps.
+- **Medallion Layers:** Built 3 progressive Delta Lake tables with stateful deduplication, schema validation, and aggregations.
+- **Orchestration:** Chained ingestion and transformation tasks into an automated 3-stage Databricks Workflow job.
 
 ---
 
-## 3. End-to-End System Architecture
+## 2. System Architecture
 
 ```mermaid
 flowchart TD
-    subgraph AWS_Cloud [AWS Cloud Infrastructure - ap-south-2 Hyderabad]
-        subgraph VPC [Custom VPC: 10.0.0.0/16]
-            IGW[Internet Gateway]
-            subgraph Public_Subnet [Public Subnet: 10.0.1.0/24]
-                EC2[EC2 t3.small Instance<br/>25GB gp3 + 2GB Swap Memory]
-                SG[Security Group: Port 22 SSH, Port 30094 NodePort]
-                
-                subgraph K8s_Cluster [Kubernetes / Minikube Engine]
-                    PROD[Python Event Stream Producer<br/>Dynamic Timestamps & Sentiment]
-                    KAFKA[Apache Kafka Broker + Zookeeper<br/>Topic: 'twitter' | 3 Partitions]
-                    PROD -->|JSON Stream| KAFKA
-                end
-            end
-        end
-        S3[Amazon S3 Landing Zone<br/>s3://social-media-lakehouse-yeshw-2026/raw_csv/]
-        IAM[IAM Role: Least-Privilege Scoped Policy]
-        IAM -.->|No Hardcoded Keys| EC2
+    subgraph AWS ["AWS Infrastructure (EC2)"]
+        PROD["Python Event Stream Producer<br/>(Dynamic Timestamps & Sentiment)"]
+        KAFKA["Apache Kafka & Zookeeper<br/>(Topic: 'twitter', 3 Partitions)"]
+        PROD -->|"JSON Stream"| KAFKA
     end
 
-    subgraph Databricks_Platform [Databricks Lakehouse Platform]
-        KAFKA -->|External NodePort 30094| SPARK_BRONZE[01_kafka_bronze_ingest<br/>Trigger.AvailableNow]
+    subgraph Databricks ["Databricks Lakehouse Platform"]
+        KAFKA -->|"NodePort 30094"| BRONZE_INGEST["01_kafka_bronze_ingest<br/>(Trigger.AvailableNow)"]
         
-        subgraph Medallion_Architecture [Medallion Storage on Delta Lake]
-            SPARK_BRONZE -->|Append-Only Raw Stream| BRONZE[(Bronze Layer<br/>bronze_social_media_raw)]
+        subgraph Medallion ["Delta Lake Medallion Architecture"]
+            BRONZE_INGEST -->|"Append-Only"| BRONZE[("Bronze Layer<br/>bronze_social_media_raw")]
             
-            BRONZE -->|Spark Structured Streaming| SPARK_SILVER[02_silver_transformations<br/>withWatermark + dropDuplicates]
-            SPARK_SILVER -->|Cleansed & Deduplicated| SILVER[(Silver Layer<br/>silver_social_media_posts)]
-            SPARK_SILVER -.->|Malformed Payloads| DLQ[(Quarantine DLQ<br/>quarantine_corrupt_events)]
+            BRONZE -->|"Structured Streaming"| SILVER_INGEST["02_silver_transformations<br/>(Watermarking & Deduplication)"]
+            SILVER_INGEST -->|"Clean Records"| SILVER[("Silver Layer<br/>silver_social_media_posts")]
+            SILVER_INGEST -.->|"Corrupted JSON"| DLQ[("Dead-Letter Queue<br/>quarantine_corrupt_events")]
             
-            SILVER -->|Windowed Aggregations| SPARK_GOLD[03_gold_aggregations]
-            SPARK_GOLD -->|Hashtag Velocity & Sentiment| GOLD_HASH[(Gold Layer<br/>gold_trending_hashtags)]
-            SPARK_GOLD -->|Influencer Analytics| GOLD_USER[(Gold Layer<br/>gold_active_users)]
+            SILVER -->|"Aggregation"| GOLD_INGEST["03_gold_aggregations"]
+            GOLD_INGEST -->|"Hashtag Metrics"| GOLD_HASH[("Gold Layer<br/>gold_trending_hashtags")]
+            GOLD_INGEST -->|"User Engagement"| GOLD_USER[("Gold Layer<br/>gold_active_users")]
         end
-        
-        subgraph UC_Governance [Unity Catalog Governance]
-            VOL[Unity Catalog Volume<br/>/Volumes/.../lakehouse_checkpoints/]
-            VOL -.->|Fault-Tolerant Checkpoints| Medallion_Architecture
-        end
-        
-        subgraph Lakeflow_Orchestration [Databricks Workflows / Jobs]
-            DAG[Visual Multi-Hop Pipeline DAG<br/>Bronze ➔ Silver ➔ Gold]
-            DAG -.->|Automated Execution| Medallion_Architecture
-        end
-        
-        subgraph BI_Presentation [Databricks Lakeview AI Dashboard]
-            GOLD_HASH --> DASH[Philippine Election Social Media Trends 2025<br/>KPI Cards | Horizontal Bar Charts | Active Users Table]
+
+        subgraph Lakeview ["Databricks Lakeview Dashboard"]
+            GOLD_HASH --> DASH["Analytics Dashboard<br/>(Trending Hashtags & User Metrics)"]
             GOLD_USER --> DASH
         end
     end
@@ -97,30 +58,30 @@ flowchart TD
 
 ---
 
-## 4. The Medallion Lakehouse Architecture
+## 3. Medallion Pipeline Architecture
 
-| Layer | Delta Table | Engineering Responsibility | Design Decisions |
+| Layer | Delta Table | Role & Purpose | Key Operations |
 | :--- | :--- | :--- | :--- |
-| **Bronze** | `bronze_social_media_raw` | Raw, immutable Kafka ingestion. Never parses or modifies payloads. | Stores raw JSON blob with metadata (`kafka_partition`, `kafka_offset`, `_ingest_timestamp`) for 100% auditability and replayability. |
-| **Silver** | `silver_social_media_posts` | Cleansed, typed, deduplicated streaming records. | Strict schema enforcement, Dead-Letter Queue (DLQ) routing, feature engineering (`engagement_score`), and **event-time watermarking (`withWatermark(10 mins)`) before stateful deduplication (`dropDuplicates`)**. |
-| **Gold** | `gold_trending_hashtags`<br/>`gold_active_users` | Curated business-level aggregations ready for BI & executive reporting. | Hashtags array exploded, post velocity computed, lexical sentiment aggregated, and user virality tracked. |
+| **Bronze** | `bronze_social_media_raw` | Raw Ingestion | Stores raw JSON messages from Kafka with topic metadata (`partition`, `offset`, `timestamp`) for replayability. |
+| **Silver** | `silver_social_media_posts` | Cleaning & Standardization | Parses JSON schema, filters malformed payloads to a Dead-Letter Queue (DLQ), calculates engagement score, and applies watermarked deduplication. |
+| **Gold** | `gold_trending_hashtags`<br/>`gold_active_users` | Business Aggregations | Explodes hashtags, calculates total post counts and engagement, and tracks active users for dashboarding. |
 
 ---
 
-## 5. Key Senior Engineering Decisions & Trade-Offs
+## 4. Technical Learnings & Challenges Solved
 
-### 1. Dual Advertised Listeners on Apache Kafka
-* **The Problem:** Kafka brokers return metadata to clients telling them where partition leaders live. Inside Kubernetes, pods talk via `kafka-service:9092`. But external Databricks clusters running in the cloud cannot resolve internal Kubernetes CoreDNS names.
-* **The Solution:** Dual Advertised Listeners:
+### 1. External Kafka Connectivity via NodePort
+- **Challenge:** Databricks runs on cloud serverless compute and needs to connect to the Kafka broker hosted inside a Minikube Kubernetes cluster on an EC2 instance. By default, Kafka advertises its internal cluster IP which external clients cannot reach.
+- **Solution:** Configured Kafka listeners with dual advertised configurations:
   ```yaml
   KAFKA_LISTENERS: "INTERNAL://0.0.0.0:9092,EXTERNAL://0.0.0.0:9094"
   KAFKA_ADVERTISED_LISTENERS: "INTERNAL://kafka-service:9092,EXTERNAL://<EC2_PUBLIC_IP>:30094"
   ```
-  Internal producer pods use the cluster IP; external Databricks streaming jobs connect to the public NodePort `30094`.
+  This allowed local cluster pods to communicate internally while enabling Databricks PySpark jobs to stream from the public NodePort `30094`.
 
-### 2. Bounded State Store: Watermarking Before Deduplication
-* **The Problem:** In Spark Structured Streaming, doing `.dropDuplicates(["event_id"])` without a watermark forces Spark's state store (RocksDB) to retain every unique tweet ID **indefinitely**. After processing millions of tweets, the driver/executors inevitably crash with an **Out-Of-Memory (OOM)** error.
-* **The Solution:**
+### 2. State Store Memory Management with Watermarks
+- **Challenge:** Using `.dropDuplicates(["event_id"])` in Spark Structured Streaming without an event-time watermark forces Spark's state store (RocksDB) to remember every single processed ID forever, eventually causing executor Out-Of-Memory (OOM) errors.
+- **Solution:** Defined an event-time watermark before deduplication:
   ```python
   deduped_silver_df = (
       valid_events_df
@@ -128,63 +89,53 @@ flowchart TD
       .dropDuplicates(["event_id", "event_timestamp"])
   )
   ```
-  Spark evicts keys older than the 10-minute watermark threshold, ensuring constant bounded memory usage.
+  This allows Spark to safely drop state for events older than 10 minutes, keeping memory usage bounded and predictable.
 
-### 3. Unity Catalog Volumes for Checkpointing (Modern Governance)
-* **The Problem:** Modern Databricks disables root DBFS (`/tmp/` and `dbfs:/`) for security and data exfiltration prevention (`[DBFS_DISABLED]`).
-* **The Solution:** Structured streaming checkpoints are written to a governed **Unity Catalog Volume**:
+### 3. Handling Corrupted Records (Dead-Letter Queue)
+- **Challenge:** Real-world streaming data often contains malformed JSON or invalid types that can abort streaming queries if not handled.
+- **Solution:** Evaluated the parsed JSON struct with `data.isNull`. Valid records proceed downstream to the Silver table, while malformed records are routed to a quarantine table (`quarantine_corrupt_events`) with an error timestamp for later inspection.
+
+### 4. Governed Checkpointing with Unity Catalog
+- **Challenge:** Modern Databricks workspaces enforce security boundaries and disable legacy root DBFS paths (`/tmp/` and `dbfs:/`).
+- **Solution:** Managed all streaming checkpoint directories inside a governed **Unity Catalog Volume**:
   ```python
   CHECKPOINT_PATH = f"/Volumes/{curr_cat}/{curr_sch}/lakehouse_checkpoints/bronze"
   ```
-  Provides access control, audit logs, and compliance without exposing cloud storage credentials.
-
-### 4. Backpressure Safety: `maxOffsetsPerTrigger = 10000`
-* **The Problem:** If a cluster restarts after a multi-hour downtime, reading an unthrottled Kafka topic with millions of backlogged events will overwhelm the executor memory heap.
-* **The Solution:** `.option("maxOffsetsPerTrigger", 10000)` sets a safe processing ceiling per micro-batch, allowing rapid catch-up in stable, predictable increments.
 
 ---
 
-## 6. Repository Structure
+## 5. Repository Structure
 
 ```text
-├── dashboard/                          # Databricks SQL Queries & Visualizations
-│   └── queries.sql                     # Executive BI analytics queries
-├── databricks/                         # Databricks PySpark Lakehouse Notebooks
-│   ├── 01_kafka_bronze_ingest.py       # Bronze layer raw Kafka streaming ingest
-│   ├── 02_silver_transformations.py    # Silver layer schema, DLQ & deduplication
-│   └── 03_gold_aggregations.py         # Gold layer analytics & business tables
-├── images/                             # Architecture & Dashboard Visualizations
-│   ├── databricks_executive_dashboard.png # Executive BI Dashboard screenshot
-│   └── databricks_workflows_dag.png    # 3-Stage Multi-Hop Lakeflow DAG run
-├── infra/                              # AWS Cloud Infrastructure Automation
-│   ├── 01_aws_infra_setup.sh           # VPC, Subnet, IGW, Route Table, SG & IAM
-│   └── teardown.sh                     # Idempotent cloud resource cleanup
-├── kubernetes/                         # Kubernetes Deployment Manifests
-│   ├── kafka/
-│   │   ├── kafka-deployment.yaml       # Kafka + Zookeeper deployment with dual listeners
-│   │   ├── kafka-service.yaml          # NodePort 30094 external routing service
-│   │   └── kafka-setup.sh              # Topic creation and verification script
-│   └── producer/
-│       ├── producer-configmap.yaml     # Pacing, broker endpoint and topic configuration
-│       └── producer-deployment.yaml    # Resilient deployment with K8s health probes
-├── producer/                           # Python Real-Time Event Producer
-│   ├── Dockerfile                      # Hardened multi-stage non-root container
-│   ├── producer.py                     # 24/7 infinite stream & high-throughput engine
-│   └── requirements.txt                # Dependencies (kafka-python, requests)
-└── README.md                           # Master Project Documentation
+├── dashboard/                          # Databricks SQL Queries for Lakeview
+│   └── queries.sql                     # Aggregation queries for dashboard charts
+├── databricks/                         # PySpark Lakehouse Notebooks
+│   ├── 01_kafka_bronze_ingest.py       # Ingests raw Kafka stream into Delta Bronze
+│   ├── 02_silver_transformations.py    # Schema enforcement, DLQ & deduplication
+│   └── 03_gold_aggregations.py         # Business aggregations for Gold tables
+├── infra/                              # AWS Cloud Setup Scripts
+│   ├── 01_aws_infra_setup.sh           # VPC, Subnet, EC2, and Security Group setup
+│   └── teardown.sh                     # Cleanup script to terminate resources
+├── kubernetes/                         # Kubernetes Manifests
+│   ├── kafka/                          # Kafka & Zookeeper deployments and service
+│   └── producer/                       # Event streamer ConfigMap and deployment
+├── producer/                           # Python Event Streamer
+│   ├── Dockerfile                      # Container file for the streamer
+│   ├── producer.py                     # Streaming producer script with sentiment logic
+│   └── requirements.txt                # Python dependencies (kafka-python, requests)
+└── README.md                           # Project Documentation
 ```
 
 ---
 
-## 7. How to Reproduce
+## 6. How to Run the Project
 
-### 1. Provision AWS Cloud Infrastructure
-```bash
-chmod +x infra/01_aws_infra_setup.sh
-./infra/01_aws_infra_setup.sh
-```
+### Prerequisites
+- AWS Account with an EC2 instance (`t3.small` or larger)
+- Docker and Minikube installed on the EC2 instance
+- A Databricks workspace (Free Community / Serverless Edition)
 
-### 2. Deploy Kafka on Kubernetes
+### Step 1: Start Kafka on Kubernetes (EC2)
 ```bash
 minikube start --driver=docker
 kubectl apply -f kubernetes/kafka/kafka-deployment.yaml
@@ -192,23 +143,28 @@ kubectl apply -f kubernetes/kafka/kafka-service.yaml
 nohup kubectl port-forward --address 0.0.0.0 svc/kafka-service 30094:9094 > /dev/null 2>&1 &
 ```
 
-### 3. Launch the Real-Time Event Streamer
+### Step 2: Start the Event Stream Producer
 ```bash
 python3 -m venv venv && source venv/bin/activate
 pip install -r producer/requirements.txt
 python3 producer/producer.py
 ```
 
-### 4. Execute the Medallion Pipeline in Databricks
-1. Import `databricks/01_kafka_bronze_ingest.py`, `02_silver_transformations.py`, and `03_gold_aggregations.py`.
-2. Configure `pipeline.kafka.bootstrap` to `<EC2_PUBLIC_IP>:30094`.
-3. Create an automated multi-task job in **Databricks Workflows** linking `Bronze ➔ Silver ➔ Gold`.
-4. Open the **Lakeview Dashboard** and hit **Refresh** to monitor real-time trends!
+### Step 3: Run the Databricks Lakehouse Pipeline
+1. Import the notebooks from `databricks/` into your Databricks workspace.
+2. In `01_kafka_bronze_ingest.py`, set your EC2 public IP address:
+   ```python
+   KAFKA_BOOTSTRAP = "<YOUR_EC2_PUBLIC_IP>:30094"
+   ```
+3. Run the notebooks sequentially or configure a **Databricks Workflows** job:
+   - Task 1: `01_kafka_bronze_ingest`
+   - Task 2: `02_silver_transformations` (depends on Task 1)
+   - Task 3: `03_gold_aggregations` (depends on Task 2)
 
 ---
 
-## 8. Author & Technical Attribution
+## 7. Author
 
-- **Architect & Developer:** Yeshwanth Gowda
-- **Domain Focus:** Real-Time Cloud Data Engineering, Streaming Lakehouse Architectures, Distributed Computing
-- **Technologies:** AWS, Kubernetes, Apache Kafka, Apache Spark, Databricks, Delta Lake, Python, SQL
+- **Developer:** Yeshwanth Gowda
+- **Background:** Postgraduate Student (Data Engineering & Distributed Systems Enthusiast)
+- **GitHub:** [@Yeshwanth-Kumar-H](https://github.com/Yeshwanth-Kumar-H)
