@@ -24,7 +24,7 @@ CHECKPOINT_BASE = f"/Volumes/{curr_cat}/{curr_sch}/lakehouse_checkpoints"
 CHECKPOINT_BRONZE = f"{CHECKPOINT_BASE}/bronze"
 
 KAFKA_BOOTSTRAP_SERVERS = spark.conf.get("pipeline.kafka.bootstrap", "18.60.200.198:30094")
-KAFKA_TOPIC = spark.conf.get("pipeline.kafka.topic", "twitter")
+KAFKA_TOPIC = spark.conf.get("pipeline.kafka.topic", "social-media-posts")
 
 print(f"📡 Connecting to Kafka Broker: {KAFKA_BOOTSTRAP_SERVERS}")
 print(f"📋 Reading Topic: {KAFKA_TOPIC}")

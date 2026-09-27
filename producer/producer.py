@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 # Configuration (Environment Variables)
 # ------------------------------------------------------------------------------
 KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:30094")
-KAFKA_TOPIC = os.getenv("KAFKA_TOPIC", "twitter")
+KAFKA_TOPIC = os.getenv("KAFKA_TOPIC", "social-media-posts")
 DATA_SOURCE = os.getenv("DATA_SOURCE", "election").lower()  # 'election', 'reddit', 'twitter', 'synthetic'
 DATASET_PATH = os.getenv("DATASET_PATH", "/home/ec2-user/dataset/philippine_elections_2025.csv")
 STREAM_DELAY_SEC = float(os.getenv("STREAM_DELAY_SEC", "0.10"))  # Default ~10 msgs/sec

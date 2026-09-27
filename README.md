@@ -30,7 +30,7 @@ This project was built to gain practical, hands-on experience building an end-to
 flowchart TD
     subgraph AWS ["AWS Infrastructure (EC2)"]
         PROD["Python Event Stream Producer<br/>(Dynamic Timestamps & Sentiment)"]
-        KAFKA["Apache Kafka & Zookeeper<br/>(Topic: 'twitter', 3 Partitions)"]
+        KAFKA["Apache Kafka & Zookeeper<br/>(Topic: 'social-media-posts', 3 Partitions)"]
         PROD -->|"JSON Stream"| KAFKA
     end
 
@@ -165,6 +165,6 @@ python3 producer/producer.py
 
 ## 7. Author
 
-- **Developer:** Yeshwanth Gowda
-- **Background:** Postgraduate Student (Data Engineering & Distributed Systems Enthusiast)
+- **Developer:** Yeshwanth Kumar H
+- **Background:** Big Data Analytics Postgraduate Student, St. Joseph's University
 - **GitHub:** [@Yeshwanth-Kumar-H](https://github.com/Yeshwanth-Kumar-H)
