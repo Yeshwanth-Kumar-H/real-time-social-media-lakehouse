@@ -1,117 +1,57 @@
 # Databricks Notebook: 03_gold_aggregations
 # ==============================================================================
-# Phase 4 & 5: Gold Layer Streaming Aggregations
-# Reads cleansed events from Silver Delta Lake, applies event-time watermarking,
-# computes sliding window aggregations for top trending hashtags and active users,
-# and persists business-ready Gold Delta tables for the BI Dashboard.
+# Phase 4 & 5: Gold Layer Streaming & Business Aggregations
+# Reads cleansed events from Silver Delta Lake, computes business-ready
+# aggregations for Top Trending Hashtags, Engagement Velocity, and Influencer Activity.
 # ==============================================================================
 
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import (
-    col, explode, window, count, avg, sum as _sum, round as _round, current_timestamp
+    col, explode, count, avg, sum as _sum, round as _round
 )
 
 spark = SparkSession.builder.appName("SocialMedia-Gold-Aggregations").getOrCreate()
 spark.sparkContext.setLogLevel("WARN")
 
-# 1. Pipeline Paths
-S3_BUCKET = spark.conf.get("pipeline.s3.bucket", "s3://social-media-lakehouse")
-SILVER_DELTA_PATH = f"{S3_BUCKET}/silver/social_media_posts"
+# 1. Read from Cleansed Silver Delta Table
+silver_df = spark.table("silver_social_media_posts")
 
-GOLD_HASHTAGS_PATH = f"{S3_BUCKET}/gold/trending_hashtags"
-GOLD_USERS_PATH = f"{S3_BUCKET}/gold/active_users"
-
-CHECKPOINT_HASHTAGS = f"{S3_BUCKET}/checkpoints/gold_hashtags"
-CHECKPOINT_USERS = f"{S3_BUCKET}/checkpoints/gold_users"
-
-# 2. Read Stream from Silver Layer
-silver_stream = (
-    spark.readStream
-    .format("delta")
-    .load(SILVER_DELTA_PATH)
-)
-
-# 3. Stream 1: Top Trending Hashtags (Windowed Aggregations with Watermark)
-# Event-time watermark allows handling late-arriving data up to 10 minutes late
+# 2. Gold Table 1: Top Trending Hashtags & Sentiment Analysis
 # Explode hashtags array so each tag is counted individually
-exploded_hashtags_df = (
-    silver_stream
-    .withWatermark("event_timestamp", "10 minutes")
+gold_hashtags_df = (
+    silver_df
     .select(
         explode(col("hashtags")).alias("hashtag"),
         col("sentiment_score"),
-        col("engagement_score"),
-        col("event_timestamp")
+        col("engagement_score")
     )
-    # 5-minute window sliding every 1 minute
-    .groupBy(
-        window(col("event_timestamp"), "5 minutes", "1 minute"),
-        col("hashtag")
-    )
+    .groupBy("hashtag")
     .agg(
-        count("hashtag").alias("post_count"),
+        count("hashtag").alias("total_posts"),
         _round(avg("sentiment_score"), 3).alias("avg_sentiment"),
         _sum("engagement_score").alias("total_engagement")
     )
-    .select(
-        col("window.start").alias("window_start"),
-        col("window.end").alias("window_end"),
-        col("hashtag"),
-        col("post_count"),
-        col("avg_sentiment"),
-        col("total_engagement"),
-        current_timestamp().alias("_updated_at")
-    )
+    .orderBy(col("total_posts").desc())
 )
 
-# Write Gold Hashtags Delta Table
-# In Delta Lake streaming aggregations with watermarks, outputMode='append' writes finalized windows
-query_hashtags = (
-    exploded_hashtags_df.writeStream
-    .format("delta")
-    .outputMode("append")
-    .option("checkpointLocation", CHECKPOINT_HASHTAGS)
-    .trigger(processingTime="10 seconds")
-    .start(GOLD_HASHTAGS_PATH)
-)
+# Persist to Gold Delta Table
+gold_hashtags_df.write.format("delta").mode("overwrite").saveAsTable("gold_trending_hashtags")
+print("✅ Gold Table 1 'gold_trending_hashtags' Created / Updated!")
 
-# 4. Stream 2: Most Active Users (Windowed Aggregations with Watermark)
-user_activity_df = (
-    silver_stream
-    .withWatermark("event_timestamp", "10 minutes")
-    .groupBy(
-        window(col("event_timestamp"), "5 minutes", "1 minute"),
-        col("user_id"),
-        col("username")
-    )
+# 3. Gold Table 2: Most Active Users & Influencers
+gold_users_df = (
+    silver_df
+    .groupBy("username")
     .agg(
-        count("event_id").alias("posts_published"),
+        count("event_id").alias("total_tweets"),
         _sum("likes").alias("total_likes"),
         _sum("retweets").alias("total_retweets"),
+        _sum("engagement_score").alias("total_engagement"),
         _round(avg("sentiment_score"), 3).alias("user_avg_sentiment")
     )
-    .select(
-        col("window.start").alias("window_start"),
-        col("window.end").alias("window_end"),
-        col("user_id"),
-        col("username"),
-        col("posts_published"),
-        col("total_likes"),
-        col("total_retweets"),
-        col("user_avg_sentiment"),
-        current_timestamp().alias("_updated_at")
-    )
+    .orderBy(col("total_tweets").desc())
 )
 
-# Write Gold Users Delta Table
-query_users = (
-    user_activity_df.writeStream
-    .format("delta")
-    .outputMode("append")
-    .option("checkpointLocation", CHECKPOINT_USERS)
-    .trigger(processingTime="10 seconds")
-    .start(GOLD_USERS_PATH)
-)
-
-print(f"Gold Trending Hashtags Query active: {query_hashtags.id}")
-print(f"Gold Active Users Query active: {query_users.id}")
+# Persist to Gold Delta Table
+gold_users_df.write.format("delta").mode("overwrite").saveAsTable("gold_active_users")
+print("✅ Gold Table 2 'gold_active_users' Created / Updated!")

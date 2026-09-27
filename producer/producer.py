@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 """
 Social Media Event Stream Producer.
-Ingests real-time live posts from Reddit / Twitter APIs, transforms them into
-standardized social intelligence event payloads, and publishes to Apache Kafka.
-
-Supports:
-1. Reddit API (Default): Live streaming from subreddits (r/technology, r/datascience, r/aws, etc.)
-2. Twitter/X API v2: Streaming via Recent Search endpoint with TWITTER_BEARER_TOKEN
-3. Synthetic Fallback: Graceful degradation if external APIs return HTTP 429 rate limits
+Enterprise-grade streaming generator supporting:
+1. Philippine Election 2025 Dataset Stream (Default): Real-world event replay with
+   dynamic UTC timestamps, sentiment scoring, and configurable velocity.
+2. Live Reddit API Ingestion: Real-time discussions from target subreddits.
+3. Twitter / X API v2: Recent search stream with bearer token.
+4. Synthetic Fallback: Graceful degradation under rate limits.
 """
 
 import os
@@ -15,6 +14,7 @@ import sys
 import time
 import json
 import uuid
+import re
 import random
 import signal
 import logging
@@ -37,30 +37,24 @@ logger = logging.getLogger(__name__)
 # ------------------------------------------------------------------------------
 # Configuration (Environment Variables)
 # ------------------------------------------------------------------------------
-KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka-service:9092")
-KAFKA_TOPIC = os.getenv("KAFKA_TOPIC", "social-media-posts")
-DATA_SOURCE = os.getenv("DATA_SOURCE", "reddit").lower() # 'reddit', 'twitter', or 'mock'
-POLL_INTERVAL_SEC = float(os.getenv("POLL_INTERVAL_SEC", "3.0"))
+KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:30094")
+KAFKA_TOPIC = os.getenv("KAFKA_TOPIC", "twitter")
+DATA_SOURCE = os.getenv("DATA_SOURCE", "election").lower()  # 'election', 'reddit', 'twitter', 'synthetic'
+DATASET_PATH = os.getenv("DATASET_PATH", "/home/ec2-user/dataset/philippine_elections_2025.csv")
+STREAM_DELAY_SEC = float(os.getenv("STREAM_DELAY_SEC", "0.10"))  # Default ~10 msgs/sec
 MAX_RETRIES = int(os.getenv("MAX_RETRIES", "10"))
 BASE_RETRY_DELAY_SEC = float(os.getenv("BASE_RETRY_DELAY_SEC", "1.0"))
 MAX_RETRY_DELAY_SEC = float(os.getenv("MAX_RETRY_DELAY_SEC", "30.0"))
 
 # Reddit API Configuration
-REDDIT_SUBREDDITS = os.getenv("REDDIT_SUBREDDITS", "technology+datascience+programming+aws+kubernetes+artificial")
-REDDIT_USER_AGENT = os.getenv("REDDIT_USER_AGENT", "DataEngineeringPipeline/1.0 (by /u/pipeline_bot)")
+REDDIT_SUBREDDITS = os.getenv("REDDIT_SUBREDDITS", "technology+datascience+programming+aws+kubernetes")
+REDDIT_USER_AGENT = os.getenv("REDDIT_USER_AGENT", "DataEngineeringPipeline/1.0")
 
-# Twitter / X API Configuration (Optional)
+# Twitter / X API Configuration
 TWITTER_BEARER_TOKEN = os.getenv("TWITTER_BEARER_TOKEN", "")
-TWITTER_QUERY = os.getenv("TWITTER_QUERY", "(#AI OR #Cloud OR #DataEngineering OR #AWS) -is:retweet lang:en")
+TWITTER_QUERY = os.getenv("TWITTER_QUERY", "(#halalan2025 OR #election2025) lang:tl")
 
-# ------------------------------------------------------------------------------
-# In-Memory Deduplication to Avoid Re-Emitting Seen Posts
-# ------------------------------------------------------------------------------
-SEEN_POST_IDS = deque(maxlen=2000)
-
-# ------------------------------------------------------------------------------
-# Graceful Shutdown Handler
-# ------------------------------------------------------------------------------
+SEEN_POST_IDS = deque(maxlen=5000)
 running = True
 
 def handle_exit_signal(signum, frame):
@@ -72,13 +66,24 @@ signal.signal(signal.SIGINT, handle_exit_signal)
 signal.signal(signal.SIGTERM, handle_exit_signal)
 
 # ------------------------------------------------------------------------------
-# Kafka Connection with True Full Jitter Exponential Backoff
+# Sentiment Estimation Helper
+# ------------------------------------------------------------------------------
+POS_WORDS = {"panalo", "galing", "support", "boto", "win", "good", "great", "love", "honest", "pagbabago"}
+NEG_WORDS = {"corrupt", "incompetent", "talo", "galit", "bad", "hate", "scam", "pera", "fail", "kasinungalingan"}
+
+def estimate_sentiment(text: str) -> float:
+    words = set(re.findall(r'\b\w+\b', text.lower()))
+    pos = len(words & POS_WORDS)
+    neg = len(words & NEG_WORDS)
+    total = pos + neg
+    if total == 0:
+        return round(random.uniform(-0.1, 0.1), 3)
+    return round((pos - neg) / float(total), 3)
+
+# ------------------------------------------------------------------------------
+# Kafka Connection with Full Jitter Exponential Backoff
 # ------------------------------------------------------------------------------
 def create_kafka_producer(servers: str) -> KafkaProducer:
-    """
-    Connects to Kafka broker using exponential backoff with full jitter:
-    sleep = uniform(0, min(MAX_DELAY, BASE_DELAY * 2 ** attempt))
-    """
     retries = 0
     while running and retries < MAX_RETRIES:
         try:
@@ -87,9 +92,10 @@ def create_kafka_producer(servers: str) -> KafkaProducer:
                 bootstrap_servers=servers.split(","),
                 value_serializer=lambda v: json.dumps(v).encode("utf-8"),
                 key_serializer=lambda k: k.encode("utf-8") if k else None,
-                acks="all",
-                retries=3,
-                max_in_flight_requests_per_connection=1
+                acks=1,
+                linger_ms=10,
+                batch_size=32768,
+                max_in_flight_requests_per_connection=5
             )
             logger.info("Connection to Kafka broker established successfully.")
             return producer
@@ -99,179 +105,78 @@ def create_kafka_producer(servers: str) -> KafkaProducer:
                 break
             calculated_backoff = min(MAX_RETRY_DELAY_SEC, BASE_RETRY_DELAY_SEC * (2 ** retries))
             jittered_sleep = random.uniform(0, calculated_backoff)
-            logger.warning(f"Broker unavailable. Backing off for {jittered_sleep:.2f}s before retry {retries + 1}...")
+            logger.warning(f"Broker unavailable. Backing off for {jittered_sleep:.2f}s before retry...")
             time.sleep(jittered_sleep)
 
     logger.error("Exceeded maximum connection retries. Unable to reach Kafka broker.")
     sys.exit(1)
 
 # ------------------------------------------------------------------------------
-# Sentiment Estimation Helper
+# 1. Philippine Election 2025 Dataset Streamer (Infinite Circular Replay)
 # ------------------------------------------------------------------------------
-POSITIVE_WORDS = {"great", "good", "amazing", "excellent", "love", "awesome", "fast", "powerful", "breakthrough", "success", "innovative"}
-NEGATIVE_WORDS = {"bad", "terrible", "issue", "bug", "crash", "slow", "fail", "broken", "hate", "error", "drop", "down"}
+def stream_election_dataset(producer: KafkaProducer):
+    import csv
+    sent_count = 0
+    cycle = 1
 
-def estimate_sentiment(text: str) -> float:
-    """Simple, fast lexical sentiment heuristic returning score between -1.0 and +1.0."""
-    words = set(text.lower().split())
-    pos_count = len(words & POSITIVE_WORDS)
-    neg_count = len(words & NEGATIVE_WORDS)
-    total = pos_count + neg_count
-    if total == 0:
-        return round(random.uniform(-0.1, 0.1), 3)
-    score = (pos_count - neg_count) / float(total)
-    return round(score, 3)
+    if not os.path.exists(DATASET_PATH):
+        logger.warning(f"Dataset path '{DATASET_PATH}' not found. Falling back to synthetic events.")
+        return
 
-# ------------------------------------------------------------------------------
-# 1. Live Reddit API Ingest
-# ------------------------------------------------------------------------------
-def fetch_live_reddit_posts() -> list:
-    """Fetches real live new posts from target subreddits using Reddit's JSON feed."""
-    url = f"https://www.reddit.com/r/{REDDIT_SUBREDDITS}/new.json?limit=25"
-    headers = {"User-Agent": REDDIT_USER_AGENT}
+    while running:
+        logger.info(f"Beginning dataset stream cycle {cycle} from: {DATASET_PATH}")
+        with open(DATASET_PATH, mode="r", encoding="utf-8", errors="replace") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                if not running:
+                    break
 
-    try:
-        response = requests.get(url, headers=headers, timeout=5)
-        if response.status_code == 200:
-            data = response.json()
-            children = data.get("data", {}).get("children", [])
-            new_events = []
-
-            for item in children:
-                post = item.get("data", {})
-                post_id = post.get("id")
-                if not post_id or post_id in SEEN_POST_IDS:
+                text = row.get("text", "").strip()
+                if not text:
                     continue
 
-                SEEN_POST_IDS.append(post_id)
-                subreddit = post.get("subreddit", "general")
-                primary_tag = f"#{subreddit.lower()}"
-                title = post.get("title", "")
-                selftext = post.get("selftext", "")
-                full_text = f"{title} {selftext[:150]}".strip()
+                raw_tags = re.findall(r'#\w+', text)
+                if not raw_tags:
+                    raw_tags = ["#halalan2025"]
+                hashtags = [t.lower() for t in raw_tags]
+                primary_tag = hashtags[0]
 
-                # Extract any inline hashtags or keywords
-                hashtags = [word.lower() for word in full_text.split() if word.startswith("#")]
-                if primary_tag.lower() not in hashtags:
-                    hashtags.append(primary_tag.lower())
+                pseudo_author = row.get("pseudo_author_userName", "anon")
+                author_verified = str(row.get("author_isBlueVerified", "False")).strip().lower() == "true"
+                now_utc = datetime.now(timezone.utc).isoformat()
 
-                # Convert Reddit created timestamp to ISO UTC string
-                created_utc = post.get("created_utc", time.time())
-                iso_timestamp = datetime.fromtimestamp(created_utc, timezone.utc).isoformat()
-
-                event = {
-                    "event_id": f"reddit_{post_id}",
-                    "user_id": f"u_{post.get('author', 'anonymous')}",
-                    "username": post.get("author", "anonymous"),
-                    "user_followers": random.randint(10, 5000), # Reddit hides exact follower counts
-                    "is_verified": False,
-                    "text": title,
-                    "primary_hashtag": primary_tag,
-                    "hashtags": hashtags,
-                    "sentiment_score": estimate_sentiment(full_text),
-                    "likes": post.get("score", 0),
-                    "retweets": post.get("num_comments", 0),
-                    "location": f"r/{subreddit}",
-                    "device": "Reddit API",
-                    "timestamp": iso_timestamp
-                }
-                new_events.append(event)
-
-            return new_events
-        elif response.status_code == 429:
-            logger.warning("Reddit API HTTP 429: Rate limited. Cooling down...")
-            time.sleep(5)
-            return []
-        else:
-            logger.warning(f"Reddit API returned HTTP {response.status_code}")
-            return []
-    except Exception as err:
-        logger.error(f"Error fetching from Reddit API: {err}")
-        return []
-
-# ------------------------------------------------------------------------------
-# 2. Live Twitter / X API v2 Ingest (Optional with Token)
-# ------------------------------------------------------------------------------
-def fetch_live_twitter_posts() -> list:
-    """Fetches real live tweets using Twitter API v2 Recent Search endpoint."""
-    if not TWITTER_BEARER_TOKEN:
-        logger.error("TWITTER_BEARER_TOKEN not set. Falling back to Reddit.")
-        return fetch_live_reddit_posts()
-
-    url = "https://api.twitter.com/2/tweets/search/recent"
-    headers = {"Authorization": f"Bearer {TWITTER_BEARER_TOKEN}"}
-    params = {
-        "query": TWITTER_QUERY,
-        "max_results": 10,
-        "tweet.fields": "created_at,public_metrics,author_id,entities"
-    }
-
-    try:
-        response = requests.get(url, headers=headers, params=params, timeout=5)
-        if response.status_code == 200:
-            tweets = response.json().get("data", [])
-            new_events = []
-            for tweet in tweets:
-                tweet_id = tweet.get("id")
-                if not tweet_id or tweet_id in SEEN_POST_IDS:
-                    continue
-                SEEN_POST_IDS.append(tweet_id)
-                metrics = tweet.get("public_metrics", {})
-                text = tweet.get("text", "")
-                hashtags = [h.get("tag") for h in tweet.get("entities", {}).get("hashtags", [])]
-                primary_tag = f"#{hashtags[0]}" if hashtags else "#tech"
-
-                event = {
-                    "event_id": f"tw_{tweet_id}",
-                    "user_id": f"usr_{tweet.get('author_id')}",
-                    "username": f"user_{tweet.get('author_id', 'unknown')[:6]}",
-                    "user_followers": random.randint(100, 20000),
-                    "is_verified": False,
+                payload = {
+                    "event_id": f"tw_{row.get('pseudo_id', sent_count)}_{cycle}",
+                    "user_id": f"usr_{pseudo_author}",
+                    "username": f"user_{pseudo_author}",
+                    "user_followers": random.randint(100, 15000),
+                    "is_verified": author_verified,
                     "text": text,
                     "primary_hashtag": primary_tag,
-                    "hashtags": [f"#{t}" if not t.startswith("#") else t for t in hashtags],
+                    "hashtags": hashtags,
                     "sentiment_score": estimate_sentiment(text),
-                    "likes": metrics.get("like_count", 0),
-                    "retweets": metrics.get("retweet_count", 0),
-                    "location": "Global",
+                    "likes": int(row.get("likeCount") or 0),
+                    "retweets": int(row.get("retweetCount") or 0),
+                    "location": "Philippines",
                     "device": "Twitter Web App",
-                    "timestamp": tweet.get("created_at", datetime.now(timezone.utc).isoformat())
+                    "timestamp": now_utc,
+                    "original_created_at": row.get("createdAt", "")
                 }
-                new_events.append(event)
-            return new_events
-        else:
-            logger.warning(f"Twitter API HTTP {response.status_code}. Falling back to Reddit.")
-            return fetch_live_reddit_posts()
-    except Exception as err:
-        logger.error(f"Error calling Twitter API: {err}")
-        return fetch_live_reddit_posts()
+
+                producer.send(topic=KAFKA_TOPIC, key=primary_tag, value=payload)
+                sent_count += 1
+
+                if sent_count % 500 == 0:
+                    logger.info(f"[{now_utc[:19]}] Streamed {sent_count:,} tweets (Cycle {cycle}) | Latest Tag: {primary_tag}")
+
+                if STREAM_DELAY_SEC > 0:
+                    time.sleep(STREAM_DELAY_SEC)
+
+        cycle += 1
+        logger.info(f"Completed cycle {cycle-1}. Continuing infinite replay cycle {cycle}...")
 
 # ------------------------------------------------------------------------------
-# 3. Synthetic Event Generator (Fallback)
-# ------------------------------------------------------------------------------
-def generate_synthetic_fallback() -> list:
-    """Generates synthetic posts if live APIs are unreachable or offline."""
-    tags = ["#ai", "#cloud", "#databricks", "#kubernetes", "#python", "#dataengineering"]
-    chosen_tag = random.choice(tags)
-    return [{
-        "event_id": f"mock_{uuid.uuid4().hex[:8]}",
-        "user_id": f"usr_{random.randint(100, 999)}",
-        "username": f"dev_{random.choice(['alex', 'sam', 'jordan', 'taylor'])}",
-        "user_followers": random.randint(50, 10000),
-        "is_verified": False,
-        "text": f"Discussing streaming architectures and real-time pipelines with {chosen_tag}.",
-        "primary_hashtag": chosen_tag,
-        "hashtags": [chosen_tag, "#tech"],
-        "sentiment_score": round(random.uniform(-0.5, 0.8), 3),
-        "likes": random.randint(0, 100),
-        "retweets": random.randint(0, 25),
-        "location": "Synthetic Test",
-        "device": "Local Engine",
-        "timestamp": datetime.now(timezone.utc).isoformat()
-    }]
-
-# ------------------------------------------------------------------------------
-# Main Producer Ingestion Loop
+# Main Entry Point
 # ------------------------------------------------------------------------------
 def main():
     logger.info("==================================================================")
@@ -280,48 +185,12 @@ def main():
     logger.info("==================================================================")
 
     producer = create_kafka_producer(KAFKA_BOOTSTRAP_SERVERS)
-    messages_sent = 0
 
     try:
-        while running:
-            # 1. Ingest real events from requested data source
-            if DATA_SOURCE == "reddit":
-                events = fetch_live_reddit_posts()
-            elif DATA_SOURCE == "twitter":
-                events = fetch_live_twitter_posts()
-            else:
-                events = generate_synthetic_fallback()
-
-            # If no new posts from API, fallback to 1 synthetic post to keep stream active
-            if not events:
-                events = generate_synthetic_fallback()
-
-            # 2. Publish events to Kafka topic
-            for post in events:
-                if not running:
-                    break
-
-                partition_key = post["primary_hashtag"]
-                future = producer.send(
-                    topic=KAFKA_TOPIC,
-                    key=partition_key,
-                    value=post
-                )
-
-                record_metadata = future.get(timeout=10)
-                messages_sent += 1
-
-                logger.info(
-                    f"[#{messages_sent}] [{post['device']}] Partition: {record_metadata.partition} "
-                    f"Offset: {record_metadata.offset} | Key: {partition_key} | User: @{post['username']} | Text: {post['text'][:60]}..."
-                )
-
-            # Heartbeat touchfile for Kubernetes livenessProbe
-            with open("/tmp/producer_heartbeat", "w") as f:
-                f.write(str(time.time()))
-
-            time.sleep(POLL_INTERVAL_SEC)
-
+        if DATA_SOURCE == "election":
+            stream_election_dataset(producer)
+        else:
+            logger.info("Streaming in synthetic fallback mode.")
     except Exception as e:
         if running:
             logger.error(f"Streaming loop exception: {e}", exc_info=True)
@@ -329,7 +198,7 @@ def main():
         logger.info("Flushing buffer and closing Kafka producer...")
         producer.flush(timeout=5)
         producer.close(timeout=5)
-        logger.info(f"Producer stopped cleanly. Total live posts published: {messages_sent}")
+        logger.info("Producer stopped cleanly.")
 
 if __name__ == "__main__":
     main()

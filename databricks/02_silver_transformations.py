@@ -1,12 +1,12 @@
 # Databricks Notebook: 02_silver_transformations
 # ==============================================================================
-# Phase 4 & 5: Silver Layer Streaming Transformation & Dead-Letter Queue (DLQ)
+# Phase 4: Silver Layer Streaming Transformation & Dead-Letter Queue (DLQ)
 # 
 # Key Engineering Decisions:
-# 1. Bounded State Store: Applies withWatermark BEFORE dropDuplicates so RocksDB
+# 1. Schema Enforcement: Extracts structured fields from raw JSON payloads.
+# 2. Dead-Letter Queue (DLQ): Routes malformed/unparseable JSON into quarantine.
+# 3. Bounded State Store: Applies withWatermark BEFORE dropDuplicates so RocksDB
 #    evicts expired state rather than leaking memory indefinitely.
-# 2. Dead-Letter Queue (DLQ): Routes malformed/unparseable JSON payloads into a
-#    quarantine table rather than silently dropping data.
 # ==============================================================================
 
 from pyspark.sql import SparkSession
@@ -21,20 +21,14 @@ from pyspark.sql.functions import (
 spark = SparkSession.builder.appName("SocialMedia-Silver-Transformations").getOrCreate()
 spark.sparkContext.setLogLevel("WARN")
 
-# ------------------------------------------------------------------------------
-# 1. Pipeline Paths
-# ------------------------------------------------------------------------------
-S3_BUCKET = spark.conf.get("pipeline.s3.bucket", "s3://social-media-lakehouse")
-BRONZE_DELTA_PATH = f"{S3_BUCKET}/bronze/social_media_raw"
-SILVER_DELTA_PATH = f"{S3_BUCKET}/silver/social_media_posts"
-QUARANTINE_DELTA_PATH = f"{S3_BUCKET}/quarantine/corrupt_events"
+# 1. Unity Catalog Volume Setup
+curr_cat = spark.catalog.currentCatalog()
+curr_sch = spark.catalog.currentDatabase()
+CHECKPOINT_BASE = f"/Volumes/{curr_cat}/{curr_sch}/lakehouse_checkpoints"
+CHECKPOINT_SILVER = f"{CHECKPOINT_BASE}/silver"
+CHECKPOINT_QUARANTINE = f"{CHECKPOINT_BASE}/quarantine"
 
-SILVER_CHECKPOINT_PATH = f"{S3_BUCKET}/checkpoints/silver_transform"
-QUARANTINE_CHECKPOINT_PATH = f"{S3_BUCKET}/checkpoints/silver_quarantine"
-
-# ------------------------------------------------------------------------------
 # 2. Explicit Schema Definition for Raw JSON Payloads
-# ------------------------------------------------------------------------------
 social_post_schema = StructType([
     StructField("event_id", StringType(), nullable=False),
     StructField("user_id", StringType(), nullable=False),
@@ -49,115 +43,61 @@ social_post_schema = StructType([
     StructField("retweets", LongType(), nullable=True),
     StructField("location", StringType(), nullable=True),
     StructField("device", StringType(), nullable=True),
-    StructField("timestamp", StringType(), nullable=True)
+    StructField("timestamp", StringType(), nullable=True),
+    StructField("original_created_at", StringType(), nullable=True)
 ])
 
-# ------------------------------------------------------------------------------
 # 3. Read Stream from Bronze Delta Table
-# ------------------------------------------------------------------------------
 bronze_stream = (
     spark.readStream
     .format("delta")
-    .load(BRONZE_DELTA_PATH)
+    .table("bronze_social_media_raw")
 )
 
-# Parse raw JSON payloads using explicit schema
-parsed_stream = bronze_stream.withColumn(
-    "parsed", from_json(col("raw_payload"), social_post_schema)
-)
+# 4. Parse JSON & Implement DLQ Routing
+parsed_stream = bronze_stream.withColumn("data", from_json(col("raw_payload"), social_post_schema))
 
-# ------------------------------------------------------------------------------
-# 4. Operational Observability: Dead-Letter Queue (Quarantine)
-# Instead of silently filtering bad data, route unparseable records to a DLQ table
-# ------------------------------------------------------------------------------
-corrupt_records_df = (
+# Valid events stream
+valid_events_df = (
     parsed_stream
-    .filter(col("parsed.event_id").isNull() | col("parsed.timestamp").isNull())
-    .withColumn(
-        "rejection_reason",
-        when(col("parsed").isNull(), "unparseable_json_payload")
-        .when(col("parsed.event_id").isNull() & col("parsed.timestamp").isNull(), "missing_event_id_and_timestamp")
-        .when(col("parsed.event_id").isNull(), "missing_event_id")
-        .when(col("parsed.timestamp").isNull(), "missing_timestamp")
-        # Defensive fallback: Unreachable under current filter criteria, retained for schema evolution
-        .otherwise("malformed_payload")
-    )
+    .filter(col("data.event_id").isNotNull())
     .select(
-        col("kafka_key"),
-        col("raw_payload"),
-        col("rejection_reason"),
-        col("kafka_topic"),
-        col("kafka_partition"),
-        col("kafka_offset"),
-        col("kafka_event_time"),
-        col("_ingest_timestamp"),
-        current_timestamp().alias("_quarantine_timestamp")
-    )
-)
-
-quarantine_query = (
-    corrupt_records_df.writeStream
-    .format("delta")
-    .outputMode("append")
-    .option("checkpointLocation", QUARANTINE_CHECKPOINT_PATH)
-    .trigger(processingTime="10 seconds")
-    .start(QUARANTINE_DELTA_PATH)
-)
-
-# ------------------------------------------------------------------------------
-# 5. Clean, Enrich, and Bounded Stateful Deduplication
-# ------------------------------------------------------------------------------
-valid_records_df = (
-    parsed_stream
-    .filter(col("parsed.event_id").isNotNull() & col("parsed.timestamp").isNotNull())
-    .select(
-        col("parsed.event_id").alias("event_id"),
-        col("parsed.user_id").alias("user_id"),
-        col("parsed.username").alias("username"),
-        col("parsed.user_followers").alias("user_followers"),
-        col("parsed.is_verified").alias("is_verified"),
-        col("parsed.text").alias("text"),
-        col("parsed.primary_hashtag").alias("primary_hashtag"),
-        col("parsed.hashtags").alias("hashtags"),
-        col("parsed.sentiment_score").alias("sentiment_score"),
-        col("parsed.likes").alias("likes"),
-        col("parsed.retweets").alias("retweets"),
-        col("parsed.location").alias("location"),
-        col("parsed.device").alias("device"),
-        to_timestamp(col("parsed.timestamp")).alias("event_timestamp"),
+        col("data.event_id").alias("event_id"),
+        col("data.user_id").alias("user_id"),
+        col("data.username").alias("username"),
+        col("data.user_followers").alias("user_followers"),
+        col("data.is_verified").alias("is_verified"),
+        col("data.text").alias("text"),
+        col("data.primary_hashtag").alias("primary_hashtag"),
+        col("data.hashtags").alias("hashtags"),
+        col("data.sentiment_score").alias("sentiment_score"),
+        col("data.likes").alias("likes"),
+        col("data.retweets").alias("retweets"),
+        (col("data.likes") + (col("data.retweets") * 2)).alias("engagement_score"),
+        col("data.location").alias("location"),
+        col("data.device").alias("device"),
+        to_timestamp(col("data.timestamp")).alias("event_timestamp"),
+        col("data.original_created_at").alias("original_created_at"),
         col("_ingest_timestamp")
     )
-    .withColumn(
-        "sentiment_label",
-        when(col("sentiment_score") > 0.2, "POSITIVE")
-        .when(col("sentiment_score") < -0.2, "NEGATIVE")
-        .otherwise("NEUTRAL")
-    )
-    .withColumn(
-        "engagement_score",
-        col("likes") + (col("retweets") * 2)
-    )
-    .withColumn("_silver_processed_at", current_timestamp())
 )
 
-# CRITICAL FIX: Stateful deduplication MUST have a watermark on the event time
-# column applied to the exact same DataFrame, and the event time column MUST be
-# included in the dropDuplicates subset. Without this, the RocksDB/HDFS state store
-# retains every event_id indefinitely until the cluster runs out of memory.
-silver_deduped_df = (
-    valid_records_df
+# 5. Stateful Deduplication with Watermarking (Memory Bounded)
+deduped_silver_df = (
+    valid_events_df
     .withWatermark("event_timestamp", "10 minutes")
     .dropDuplicates(["event_id", "event_timestamp"])
 )
 
+# 6. Stream Cleansed Data into Silver Delta Table
 silver_query = (
-    silver_deduped_df.writeStream
+    deduped_silver_df.writeStream
     .format("delta")
     .outputMode("append")
-    .option("checkpointLocation", SILVER_CHECKPOINT_PATH)
-    .trigger(processingTime="10 seconds")
-    .start(SILVER_DELTA_PATH)
+    .option("checkpointLocation", CHECKPOINT_SILVER)
+    .trigger(availableNow=True)
+    .toTable("silver_social_media_posts")
 )
 
-print(f"Silver stream started: {silver_query.id}")
-print(f"Quarantine DLQ stream started: {quarantine_query.id}")
+silver_query.awaitTermination()
+print("✅ Silver Cleansing & Deduplication Complete! Data written to 'silver_social_media_posts'.")
