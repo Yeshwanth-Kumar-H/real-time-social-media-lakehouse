@@ -152,11 +152,6 @@ flowchart TD
 │   └── requirements.txt                # Dependencies (kafka-python, requests)
 ├── dashboard/                          # Databricks SQL Queries & Visualizations
 │   └── queries.sql                     # Executive BI analytics queries
-├── docs/                               # Senior Engineering Interview Mastery Guides
-│   ├── phase1_aws_networking_interview_guide.md
-│   ├── phase2_containerization_kubernetes_interview_guide.md
-│   ├── phase3_kafka_streaming_interview_guide.md
-│   └── phase4_spark_streaming_delta_lake_interview_guide.md
 └── README.md                           # Master Project Documentation
 ```
 
