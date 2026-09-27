@@ -24,7 +24,23 @@ This project delivers an **end-to-end, enterprise-grade streaming Lakehouse plat
 
 ---
 
-## 2. End-to-End System Architecture
+## 2. Visual Platform Showcase
+
+### 📊 Executive Real-Time BI Dashboard
+> **Live Databricks Lakeview Dashboard:** Displays real-time Philippine Election 2025 intelligence, **299,247 analyzed posts**, **13,517,442 user interactions**, and horizontal ranking charts for hashtag velocity and citizen engagement.
+
+![Philippine Election 2025 Live Analytics Dashboard](images/databricks_executive_dashboard.png)
+
+---
+
+### ⚡ Automated Multi-Hop Orchestration DAG (Databricks Workflows)
+> **Production Multi-Hop Pipeline:** Automated execution of `Bronze_Ingestion` ➔ `Silver_Transformation` ➔ `Gold_Aggregation` on Databricks Serverless compute with sequential task dependencies and zero pipeline latency.
+
+![Databricks Workflows Automated Pipeline DAG](images/databricks_workflows_dag.png)
+
+---
+
+## 3. End-to-End System Architecture
 
 ```mermaid
 flowchart TD
@@ -81,7 +97,7 @@ flowchart TD
 
 ---
 
-## 3. The Medallion Lakehouse Architecture
+## 4. The Medallion Lakehouse Architecture
 
 | Layer | Delta Table | Engineering Responsibility | Design Decisions |
 | :--- | :--- | :--- | :--- |
@@ -91,7 +107,7 @@ flowchart TD
 
 ---
 
-## 4. Key Senior Engineering Decisions & Trade-Offs
+## 5. Key Senior Engineering Decisions & Trade-Offs
 
 ### 1. Dual Advertised Listeners on Apache Kafka
 * **The Problem:** Kafka brokers return metadata to clients telling them where partition leaders live. Inside Kubernetes, pods talk via `kafka-service:9092`. But external Databricks clusters running in the cloud cannot resolve internal Kubernetes CoreDNS names.
@@ -128,13 +144,18 @@ flowchart TD
 
 ---
 
-## 5. Repository Structure
+## 6. Repository Structure
 
 ```text
+├── dashboard/                          # Databricks SQL Queries & Visualizations
+│   └── queries.sql                     # Executive BI analytics queries
 ├── databricks/                         # Databricks PySpark Lakehouse Notebooks
 │   ├── 01_kafka_bronze_ingest.py       # Bronze layer raw Kafka streaming ingest
 │   ├── 02_silver_transformations.py    # Silver layer schema, DLQ & deduplication
 │   └── 03_gold_aggregations.py         # Gold layer analytics & business tables
+├── images/                             # Architecture & Dashboard Visualizations
+│   ├── databricks_executive_dashboard.png # Executive BI Dashboard screenshot
+│   └── databricks_workflows_dag.png    # 3-Stage Multi-Hop Lakeflow DAG run
 ├── infra/                              # AWS Cloud Infrastructure Automation
 │   ├── 01_aws_infra_setup.sh           # VPC, Subnet, IGW, Route Table, SG & IAM
 │   └── teardown.sh                     # Idempotent cloud resource cleanup
@@ -150,14 +171,12 @@ flowchart TD
 │   ├── Dockerfile                      # Hardened multi-stage non-root container
 │   ├── producer.py                     # 24/7 infinite stream & high-throughput engine
 │   └── requirements.txt                # Dependencies (kafka-python, requests)
-├── dashboard/                          # Databricks SQL Queries & Visualizations
-│   └── queries.sql                     # Executive BI analytics queries
 └── README.md                           # Master Project Documentation
 ```
 
 ---
 
-## 6. How to Reproduce
+## 7. How to Reproduce
 
 ### 1. Provision AWS Cloud Infrastructure
 ```bash
@@ -188,7 +207,7 @@ python3 producer/producer.py
 
 ---
 
-## 7. Author & Technical Attribution
+## 8. Author & Technical Attribution
 
 - **Architect & Developer:** Yeshwanth Gowda
 - **Domain Focus:** Real-Time Cloud Data Engineering, Streaming Lakehouse Architectures, Distributed Computing
