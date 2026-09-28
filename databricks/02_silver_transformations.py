@@ -112,23 +112,10 @@ silver_query.awaitTermination()
 print("✅ Silver Cleansing & Deduplication Complete! Data written to 'silver_social_media_posts'.")
 
 # COMMAND ----------
-# 4. Verify Silver Record Count (Python or %sql)
-# Option A: PySpark
+# 4. Verify Silver Record Count
 silver_count = spark.table("silver_social_media_posts").count()
 print(f"📊 Total Cleansed Records in 'silver_social_media_posts': {silver_count:,}")
 
-# Option B: Run in a SQL cell:
-# %sql
-# SELECT COUNT(*) AS total_silver_records FROM silver_social_media_posts;
-
 # COMMAND ----------
-# 5. Preview Cleansed Silver Records (Python or %sql)
-# Option A: PySpark
+# 5. Preview Cleansed Silver Records
 display(spark.table("silver_social_media_posts").orderBy(col("event_timestamp").desc()).limit(10))
-
-# Option B: Run in a SQL cell:
-# %sql
-# SELECT event_id, username, primary_hashtag, sentiment_label, engagement_score, event_timestamp
-# FROM silver_social_media_posts
-# ORDER BY event_timestamp DESC
-# LIMIT 10;

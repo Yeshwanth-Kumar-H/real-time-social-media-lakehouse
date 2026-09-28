@@ -91,23 +91,10 @@ bronze_query.awaitTermination()
 print("✅ Bronze Ingestion Complete! Data safely committed to 'bronze_social_media_raw'.")
 
 # COMMAND ----------
-# 4. Verify Bronze Record Count (Python or %sql)
-# Option A: PySpark
+# 4. Verify Bronze Record Count
 total_records = spark.table("bronze_social_media_raw").count()
 print(f"📊 Total Records in 'bronze_social_media_raw': {total_records:,}")
 
-# Option B: Run in a SQL cell:
-# %sql
-# SELECT COUNT(*) AS total_records FROM bronze_social_media_raw;
-
 # COMMAND ----------
-# 5. Preview Raw Bronze Records (Python or %sql)
-# Option A: PySpark
+# 5. Preview Raw Bronze Records
 display(spark.table("bronze_social_media_raw").orderBy(col("_ingest_timestamp").desc()).limit(10))
-
-# Option B: Run in a SQL cell:
-# %sql
-# SELECT kafka_topic, kafka_partition, kafka_offset, _ingest_timestamp, raw_payload
-# FROM bronze_social_media_raw
-# ORDER BY _ingest_timestamp DESC
-# LIMIT 10;

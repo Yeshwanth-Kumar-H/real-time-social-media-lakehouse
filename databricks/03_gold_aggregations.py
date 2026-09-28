@@ -61,25 +61,9 @@ gold_users_df.write.format("delta").mode("overwrite").saveAsTable("gold_active_u
 print("✅ Gold Table 2 'gold_active_users' Created / Updated!")
 
 # COMMAND ----------
-# 4. Preview Gold Trending Hashtags (Python or %sql)
-# Option A: PySpark
+# 4. Preview Gold Trending Hashtags
 display(spark.table("gold_trending_hashtags").limit(10))
 
-# Option B: Run in a SQL cell:
-# %sql
-# SELECT hashtag, total_posts, avg_sentiment, total_engagement
-# FROM gold_trending_hashtags
-# ORDER BY total_posts DESC
-# LIMIT 10;
-
 # COMMAND ----------
-# 5. Preview Gold Active Users (Python or %sql)
-# Option A: PySpark
+# 5. Preview Gold Active Users
 display(spark.table("gold_active_users").limit(10))
-
-# Option B: Run in a SQL cell:
-# %sql
-# SELECT username, total_tweets, total_likes, total_retweets, total_engagement, user_avg_sentiment
-# FROM gold_active_users
-# ORDER BY total_tweets DESC
-# LIMIT 10;
