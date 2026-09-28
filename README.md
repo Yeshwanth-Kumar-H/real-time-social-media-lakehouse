@@ -26,11 +26,24 @@ This project was built to gain practical, hands-on experience building an end-to
 
 ### 📊 Live Executive Dashboard (Databricks Lakeview)
 
-![Real-Time Philippine Election Social Media Intelligence Dashboard](assets/databricks_dashboard_interactive.png)
+![Real-Time Philippine Election Social Media Intelligence Dashboard](assets/databricks_dashboard.png)
 
 ---
 
-## 2. System Architecture
+## 2. Skills & Technologies Used
+
+| Domain | Technology / Tool | Application in This Project |
+| :--- | :--- | :--- |
+| **Stream Ingestion** | **Apache Kafka** | Real-time event broker with dynamic topic partitioning (`social-media-posts`, 3 partitions) and external NodePort `30094` networking. |
+| **Stream Processing** | **Apache Spark (PySpark)** | Structured Streaming micro-batching (`AvailableNow`), explicit JSON schema enforcement, calculated metrics (`engagement_score`, `sentiment_label`), and 10-minute event-time watermarking. |
+| **Lakehouse Storage** | **Delta Lake** | Medallion architecture (Bronze ➔ Silver ➔ Gold), ACID transactions, stateful deduplication, schema evolution (`mergeSchema`), and idempotent table overwrites (`overwriteSchema`). |
+| **Cloud & Containers** | **AWS (EC2), Kubernetes, Docker** | Deployed Minikube and containerized Kafka broker on an Amazon EC2 instance (`ap-south-2`) with secure port-forwarding and automated lifecycle management. |
+| **Analytics & BI** | **Databricks Lakehouse & SQL** | Serverless Compute, Unity Catalog Volumes for stream checkpoint governance, Databricks SQL modeling, and real-time Lakeview executive dashboards. |
+| **Languages & Tools** | **Python 3, Databricks SQL, Bash, Git** | Live stream generator script (`kafka-python`), automated restart scripts (`start_lakehouse_stream.sh`), and Git version control. |
+
+---
+
+## 3. System Architecture
 
 ```mermaid
 flowchart TD
@@ -64,7 +77,7 @@ flowchart TD
 
 ---
 
-## 3. Medallion Pipeline Architecture
+## 4. Medallion Pipeline Architecture
 
 | Layer | Delta Table | Role & Purpose | Key Operations |
 | :--- | :--- | :--- | :--- |
@@ -74,7 +87,7 @@ flowchart TD
 
 ---
 
-## 4. Technical Learnings & Challenges Solved
+## 5. Technical Learnings & Challenges Solved
 
 ### 1. External Kafka Connectivity via NodePort
 - **Challenge:** Databricks runs on cloud serverless compute and needs to connect to the Kafka broker hosted inside a Minikube Kubernetes cluster on an EC2 instance. By default, Kafka advertises its internal cluster IP which external clients cannot reach.
@@ -105,17 +118,16 @@ flowchart TD
 - **Challenge:** Modern Databricks workspaces enforce security boundaries and disable legacy root DBFS paths (`/tmp/` and `dbfs:/`).
 - **Solution:** Managed all streaming checkpoint directories inside a governed **Unity Catalog Volume**:
   ```python
-  CHECKPOINT_PATH = f"/Volumes/{curr_cat}/{curr_sch}/lakehouse_checkpoints/bronze"
+  CHECKPOINT_PATH = f"/Volumes/{curr_cat}/{curr_sch}/lakehouse_checkpoints/bronze_stream"
   ```
 
 ---
 
-## 5. Repository Structure
+## 6. Repository Structure
 
 ```text
 ├── assets/                             # Real-time dashboard screenshots and architecture assets
-│   ├── databricks_dashboard_interactive.png
-│   └── databricks_lakehouse_dashboard.png
+│   └── databricks_dashboard.png        # Live Databricks Lakeview executive dashboard
 ├── dashboard/                          # Databricks SQL Queries for Lakeview
 │   └── queries.sql                     # Aggregation queries for dashboard charts
 ├── databricks/                         # PySpark Lakehouse Notebooks
@@ -138,7 +150,7 @@ flowchart TD
 
 ---
 
-## 6. How to Run the Project
+## 7. How to Run the Project
 
 ### Prerequisites
 - AWS Account with an EC2 instance (`t3.small` or larger)
@@ -173,7 +185,7 @@ python3 producer/producer.py
 
 ---
 
-## 7. Author
+## 8. Author
 
 - **Developer:** Yeshwanth Kumar H
 - **Background:** Big Data Analytics Postgraduate Student, St. Joseph's University

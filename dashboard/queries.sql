@@ -73,3 +73,14 @@ SELECT
 FROM silver_social_media_posts
 GROUP BY device
 ORDER BY post_count DESC;
+
+
+-- ------------------------------------------------------------------------------
+-- Visual 6: Top Hashtag KPI Counter Card
+-- Surfaces the single leading hashtag by post count (#halalan2025)
+-- ------------------------------------------------------------------------------
+SELECT 
+    hashtag AS top_hashtag
+FROM gold_trending_hashtags
+ORDER BY total_posts DESC
+LIMIT 1;
