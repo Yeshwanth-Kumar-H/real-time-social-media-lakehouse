@@ -17,7 +17,7 @@ print(f"Active Catalog: '{curr_cat}' | Schema: '{curr_sch}'")
 # Ensure governed Volume exists for stream checkpoints
 spark.sql(f"CREATE VOLUME IF NOT EXISTS {curr_cat}.{curr_sch}.lakehouse_checkpoints")
 CHECKPOINT_BASE = f"/Volumes/{curr_cat}/{curr_sch}/lakehouse_checkpoints"
-CHECKPOINT_BRONZE = f"{CHECKPOINT_BASE}/bronze_live"
+CHECKPOINT_BRONZE = f"{CHECKPOINT_BASE}/bronze_stream"
 
 print(f"✅ Governed Checkpoint Volume is ready at: {CHECKPOINT_BRONZE}")
 

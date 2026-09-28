@@ -25,8 +25,8 @@ curr_sch = spark.catalog.currentDatabase()
 print(f"Active Catalog: '{curr_cat}' | Schema: '{curr_sch}'")
 
 CHECKPOINT_BASE = f"/Volumes/{curr_cat}/{curr_sch}/lakehouse_checkpoints"
-CHECKPOINT_SILVER = f"{CHECKPOINT_BASE}/silver_live"
-CHECKPOINT_DLQ = f"{CHECKPOINT_BASE}/quarantine_live"
+CHECKPOINT_SILVER = f"{CHECKPOINT_BASE}/silver_stream"
+CHECKPOINT_DLQ = f"{CHECKPOINT_BASE}/quarantine_stream"
 
 # COMMAND ----------
 # 2. Schema Definition for Social Media Event Stream
