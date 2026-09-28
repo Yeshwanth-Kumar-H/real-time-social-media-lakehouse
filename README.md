@@ -30,16 +30,14 @@ This project was built to gain practical, hands-on experience building an end-to
 
 ---
 
-## 2. Skills & Technologies Used
+## 2. Core Technologies & Engineering Focus
 
-| Domain | Technology / Tool | Application in This Project |
-| :--- | :--- | :--- |
-| **Stream Ingestion** | **Apache Kafka** | Real-time event broker with dynamic topic partitioning (`social-media-posts`, 3 partitions) and external NodePort `30094` networking. |
-| **Stream Processing** | **Apache Spark (PySpark)** | Structured Streaming micro-batching (`AvailableNow`), explicit JSON schema enforcement, calculated metrics (`engagement_score`, `sentiment_label`), and 10-minute event-time watermarking. |
-| **Lakehouse Storage** | **Delta Lake** | Medallion architecture (Bronze ➔ Silver ➔ Gold), ACID transactions, stateful deduplication, schema evolution (`mergeSchema`), and idempotent table overwrites (`overwriteSchema`). |
-| **Cloud & Containers** | **AWS (EC2), Kubernetes, Docker** | Deployed Minikube and containerized Kafka broker on an Amazon EC2 instance (`ap-south-2`) with secure port-forwarding and automated lifecycle management. |
-| **Analytics & BI** | **Databricks Lakehouse & SQL** | Serverless Compute, Unity Catalog Volumes for stream checkpoint governance, Databricks SQL modeling, and real-time Lakeview executive dashboards. |
-| **Languages & Tools** | **Python 3, Databricks SQL, Bash, Git** | Live stream generator script (`kafka-python`), automated restart scripts (`start_lakehouse_stream.sh`), and Git version control. |
+- **Apache Kafka (Stream Ingestion):** Real-time distributed event broker configured with dynamic 3-way topic partitioning (`social-media-posts`) and dual internal/external listeners via Kubernetes NodePort `30094`.
+- **Apache Spark / PySpark (Stream Processing):** Structured Streaming micro-batching (`AvailableNow`), explicit JSON schema parsing, computed engagement metrics, and 10-minute event-time watermarking for bounded state memory.
+- **Delta Lake (Lakehouse Storage):** Medallion architecture (Bronze ➔ Silver ➔ Gold), ACID transactions, stateful deduplication, schema evolution (`mergeSchema`), and idempotent table overwrites (`overwriteSchema`).
+- **AWS & Kubernetes (Infrastructure):** Containerized Kafka broker on Amazon EC2 (Amazon Linux 2023) with Minikube, least-privilege IAM roles, and automated service recovery scripts.
+- **Databricks Lakehouse & SQL (Analytics & BI):** Serverless compute, Unity Catalog Volume checkpointing, Databricks SQL data modeling, and a real-time Lakeview executive dashboard.
+- **Python & Shell (Tooling):** Streaming replay generator (`kafka-python`) with dynamic UTC timestamps, Bash automation, and Git version control.
 
 ---
 
