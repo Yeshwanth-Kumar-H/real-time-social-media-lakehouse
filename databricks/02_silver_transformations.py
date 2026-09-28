@@ -100,6 +100,7 @@ silver_query = (
     .format("delta")
     .outputMode("append")
     .option("checkpointLocation", CHECKPOINT_SILVER)
+    .option("mergeSchema", "true")
     .trigger(availableNow=True)
     .toTable("silver_social_media_posts")
 )
