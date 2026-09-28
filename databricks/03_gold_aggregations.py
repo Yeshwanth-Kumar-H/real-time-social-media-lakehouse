@@ -5,6 +5,8 @@
 # aggregations for Top Trending Hashtags, Engagement Velocity, and Influencer Activity.
 # ==============================================================================
 
+# COMMAND ----------
+# 1. Environment & Read from Cleansed Silver Delta Table
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import (
     col, explode, count, avg, sum as _sum, round as _round
@@ -13,11 +15,12 @@ from pyspark.sql.functions import (
 spark = SparkSession.builder.appName("SocialMedia-Gold-Aggregations").getOrCreate()
 spark.sparkContext.setLogLevel("WARN")
 
-# 1. Read from Cleansed Silver Delta Table
 silver_df = spark.table("silver_social_media_posts")
+print(f"📊 Reading from 'silver_social_media_posts' ({silver_df.count():,} rows)")
 
-# 2. Gold Table 1: Top Trending Hashtags & Sentiment Analysis
-# Explode hashtags array so each tag is counted individually
+# COMMAND ----------
+# 2. Gold Table 1: Top Trending Hashtags & Sentiment
+# Explode hashtags array so each individual tag is aggregated
 gold_hashtags_df = (
     silver_df
     .select(
@@ -38,6 +41,7 @@ gold_hashtags_df = (
 gold_hashtags_df.write.format("delta").mode("overwrite").saveAsTable("gold_trending_hashtags")
 print("✅ Gold Table 1 'gold_trending_hashtags' Created / Updated!")
 
+# COMMAND ----------
 # 3. Gold Table 2: Most Active Users & Influencers
 gold_users_df = (
     silver_df
@@ -55,3 +59,11 @@ gold_users_df = (
 # Persist to Gold Delta Table
 gold_users_df.write.format("delta").mode("overwrite").saveAsTable("gold_active_users")
 print("✅ Gold Table 2 'gold_active_users' Created / Updated!")
+
+# COMMAND ----------
+# 4. Preview Gold Trending Hashtags
+display(spark.table("gold_trending_hashtags").limit(10))
+
+# COMMAND ----------
+# 5. Preview Gold Active Users
+display(spark.table("gold_active_users").limit(10))

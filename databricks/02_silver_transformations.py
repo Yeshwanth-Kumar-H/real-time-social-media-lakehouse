@@ -7,8 +7,11 @@
 # 2. Dead-Letter Queue (DLQ): Routes malformed/unparseable JSON into quarantine.
 # 3. Bounded State Store: Applies withWatermark BEFORE dropDuplicates so RocksDB
 #    evicts expired state rather than leaking memory indefinitely.
+# 4. Serverless Compatibility: Uses trigger(availableNow=True) with awaitTermination().
 # ==============================================================================
 
+# COMMAND ----------
+# 1. Environment & Unity Catalog Volume Checkpoint Setup
 from pyspark.sql import SparkSession
 from pyspark.sql.types import (
     StructType, StructField, StringType, DoubleType,
@@ -21,14 +24,16 @@ from pyspark.sql.functions import (
 spark = SparkSession.builder.appName("SocialMedia-Silver-Transformations").getOrCreate()
 spark.sparkContext.setLogLevel("WARN")
 
-# 1. Unity Catalog Volume Setup
 curr_cat = spark.catalog.currentCatalog()
 curr_sch = spark.catalog.currentDatabase()
-CHECKPOINT_BASE = f"/Volumes/{curr_cat}/{curr_sch}/lakehouse_checkpoints"
-CHECKPOINT_SILVER = f"{CHECKPOINT_BASE}/silver"
-CHECKPOINT_QUARANTINE = f"{CHECKPOINT_BASE}/quarantine"
+print(f"Active Catalog: '{curr_cat}' | Schema: '{curr_sch}'")
 
-# 2. Explicit Schema Definition for Raw JSON Payloads
+CHECKPOINT_BASE = f"/Volumes/{curr_cat}/{curr_sch}/lakehouse_checkpoints"
+CHECKPOINT_SILVER = f"{CHECKPOINT_BASE}/silver_live"
+CHECKPOINT_DLQ = f"{CHECKPOINT_BASE}/quarantine_live"
+
+# COMMAND ----------
+# 2. Schema Definition for Social Media Event Stream
 social_post_schema = StructType([
     StructField("event_id", StringType(), nullable=False),
     StructField("user_id", StringType(), nullable=False),
@@ -47,17 +52,18 @@ social_post_schema = StructType([
     StructField("original_created_at", StringType(), nullable=True)
 ])
 
-# 3. Read Stream from Bronze Delta Table
+# COMMAND ----------
+# 3. Read Stream from Bronze Delta Table, Cleanse, Deduplicate & Write to Silver
 bronze_stream = (
     spark.readStream
     .format("delta")
     .table("bronze_social_media_raw")
 )
 
-# 4. Parse JSON & Implement DLQ Routing
+# Parse JSON payload against explicit schema
 parsed_stream = bronze_stream.withColumn("data", from_json(col("raw_payload"), social_post_schema))
 
-# Valid events stream
+# Valid structured records stream
 valid_events_df = (
     parsed_stream
     .filter(col("data.event_id").isNotNull())
@@ -71,6 +77,9 @@ valid_events_df = (
         col("data.primary_hashtag").alias("primary_hashtag"),
         col("data.hashtags").alias("hashtags"),
         col("data.sentiment_score").alias("sentiment_score"),
+        when(col("data.sentiment_score") > 0.05, "Positive")
+        .when(col("data.sentiment_score") < -0.05, "Negative")
+        .otherwise("Neutral").alias("sentiment_label"),
         col("data.likes").alias("likes"),
         col("data.retweets").alias("retweets"),
         (col("data.likes") + (col("data.retweets") * 2)).alias("engagement_score"),
@@ -82,14 +91,14 @@ valid_events_df = (
     )
 )
 
-# 5. Stateful Deduplication with Watermarking (Memory Bounded)
+# Stateful Deduplication with 10-Minute Watermark (Bounds memory in state store)
 deduped_silver_df = (
     valid_events_df
     .withWatermark("event_timestamp", "10 minutes")
     .dropDuplicates(["event_id", "event_timestamp"])
 )
 
-# 6. Stream Cleansed Data into Silver Delta Table
+# Write to Silver Delta Lake table
 silver_query = (
     deduped_silver_df.writeStream
     .format("delta")
@@ -101,3 +110,12 @@ silver_query = (
 
 silver_query.awaitTermination()
 print("✅ Silver Cleansing & Deduplication Complete! Data written to 'silver_social_media_posts'.")
+
+# COMMAND ----------
+# 4. Verify Silver Record Count
+silver_count = spark.table("silver_social_media_posts").count()
+print(f"📊 Total Cleansed Records in 'silver_social_media_posts': {silver_count:,}")
+
+# COMMAND ----------
+# 5. Preview Cleansed Silver Records
+display(spark.table("silver_social_media_posts").orderBy(col("event_timestamp").desc()).limit(10))

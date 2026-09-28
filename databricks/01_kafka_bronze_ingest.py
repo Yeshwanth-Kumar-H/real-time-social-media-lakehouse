@@ -2,18 +2,18 @@
 # ==============================================================================
 # Phase 4: Bronze Layer Streaming Ingestion
 # Ingests raw social media events from Apache Kafka into an append-only
-# Delta Lake Bronze table on Databricks Unity Catalog / S3 with fault-tolerant checkpointing.
+# Delta Lake Bronze table on Databricks Unity Catalog with fault-tolerant checkpointing.
 # ==============================================================================
 
+# COMMAND ----------
+# 1. Environment & Unity Catalog Checkpoint Setup
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, current_timestamp
 
-# 1. Initialize Spark Session
 spark = SparkSession.builder.appName("SocialMedia-Bronze-Ingestion").getOrCreate()
 spark.sparkContext.setLogLevel("WARN")
 
-# 2. Pipeline Configuration Parameters
-# Supports both Unity Catalog Volumes and S3 storage
+# Identify active Unity Catalog catalog and schema
 curr_cat = spark.catalog.currentCatalog()
 curr_sch = spark.catalog.currentDatabase()
 print(f"Active Catalog: '{curr_cat}' | Schema: '{curr_sch}'")
@@ -21,31 +21,52 @@ print(f"Active Catalog: '{curr_cat}' | Schema: '{curr_sch}'")
 # Ensure governed Volume exists for stream checkpoints
 spark.sql(f"CREATE VOLUME IF NOT EXISTS {curr_cat}.{curr_sch}.lakehouse_checkpoints")
 CHECKPOINT_BASE = f"/Volumes/{curr_cat}/{curr_sch}/lakehouse_checkpoints"
-CHECKPOINT_BRONZE = f"{CHECKPOINT_BASE}/bronze"
+CHECKPOINT_BRONZE = f"{CHECKPOINT_BASE}/bronze_live"
 
-KAFKA_BOOTSTRAP_SERVERS = spark.conf.get("pipeline.kafka.bootstrap", "18.60.200.198:30094")
-KAFKA_TOPIC = spark.conf.get("pipeline.kafka.topic", "social-media-posts")
+print(f"✅ Governed Checkpoint Volume is ready at: {CHECKPOINT_BRONZE}")
+
+# COMMAND ----------
+# 2. Network Connectivity Validation (Broker Socket Test)
+import socket
+
+BROKER_IP = "18.60.227.243"
+BROKER_PORT = 30094
+
+s = socket.socket()
+s.settimeout(5)
+res = s.connect_ex((BROKER_IP, BROKER_PORT))
+if res == 0:
+    print(f"🎉 SUCCESS! Databricks can reach Kafka broker at {BROKER_IP}:{BROKER_PORT}")
+else:
+    print(f"❌ Connection failed with code {res}")
+s.close()
+
+# COMMAND ----------
+# 3. Stream Raw Events from Kafka into Bronze Delta Table
+# NOTE: Databricks Serverless compute enforces Trigger.AvailableNow (or Once).
+# Continuous processing triggers like trigger(processingTime="...") fail with
+# [INFINITE_STREAMING_TRIGGER_NOT_SUPPORTED]. AvailableNow micro-batches all available
+# messages efficiently and commits offsets with complete state guarantee.
+
+KAFKA_BOOTSTRAP_SERVERS = f"{BROKER_IP}:{BROKER_PORT}"
+KAFKA_TOPIC = "twitter"  # Dual-published topic; 'social-media-posts' is also available
 
 print(f"📡 Connecting to Kafka Broker: {KAFKA_BOOTSTRAP_SERVERS}")
 print(f"📋 Reading Topic: {KAFKA_TOPIC}")
 print(f"💾 Checkpoint Location: {CHECKPOINT_BRONZE}")
 
-# 3. Read Stream from Apache Kafka
-# Uses spark-sql-kafka-0-10 connector
 kafka_stream_df = (
     spark.readStream
     .format("kafka")
     .option("kafka.bootstrap.servers", KAFKA_BOOTSTRAP_SERVERS)
     .option("subscribe", KAFKA_TOPIC)
-    .option("startingOffsets", "earliest")          # Catch up on all historical events
-    .option("failOnDataLoss", "false")              # Avoid stream crash if Kafka logs roll over
-    .option("maxOffsetsPerTrigger", 10000)          # Bounded safety ceiling to protect memory during catch-up
+    .option("startingOffsets", "earliest")          # Ingest all historical messages from stream start
+    .option("failOnDataLoss", "false")              # Protect against offset resets if pod restarts
+    .option("maxOffsetsPerTrigger", 10000)          # Bounded safety ceiling per micro-batch
     .load()
 )
 
-# 4. Extract Raw Kafka Fields & Add Lineage Metadata
-# Enterprise Best Practice: Bronze table should NEVER parse or modify the payload.
-# It stores the immutable raw message with lineage metadata for complete auditability.
+# Extract raw Kafka payload & append lineage audit metadata
 bronze_df = kafka_stream_df.select(
     col("key").cast("string").alias("kafka_key"),
     col("value").cast("string").alias("raw_payload"),
@@ -56,8 +77,7 @@ bronze_df = kafka_stream_df.select(
     current_timestamp().alias("_ingest_timestamp")
 )
 
-# 5. Stream Raw Events into Bronze Delta Table
-# Uses Trigger.AvailableNow for efficient micro-batching on Serverless & Workflow orchestration
+# Stream raw events into append-only Bronze Delta Lake table
 bronze_query = (
     bronze_df.writeStream
     .format("delta")
@@ -69,3 +89,12 @@ bronze_query = (
 
 bronze_query.awaitTermination()
 print("✅ Bronze Ingestion Complete! Data safely committed to 'bronze_social_media_raw'.")
+
+# COMMAND ----------
+# 4. Verify Bronze Record Count
+total_records = spark.table("bronze_social_media_raw").count()
+print(f"📊 Total Records in 'bronze_social_media_raw': {total_records:,}")
+
+# COMMAND ----------
+# 5. Preview Raw Bronze Records
+display(spark.table("bronze_social_media_raw").orderBy(col("_ingest_timestamp").desc()).limit(10))
