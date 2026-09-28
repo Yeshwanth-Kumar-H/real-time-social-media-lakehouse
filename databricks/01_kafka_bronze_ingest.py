@@ -29,7 +29,7 @@ print(f"✅ Governed Checkpoint Volume is ready at: {CHECKPOINT_BRONZE}")
 # 2. Network Connectivity Validation (Broker Socket Test)
 import socket
 
-BROKER_IP = "18.60.227.243"
+BROKER_IP = "98.130.142.79"
 BROKER_PORT = 30094
 
 s = socket.socket()
