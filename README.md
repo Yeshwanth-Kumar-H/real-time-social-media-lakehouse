@@ -17,10 +17,16 @@ During major national events such as elections, public social media activity sur
 This project was built to gain practical, hands-on experience building an end-to-end streaming data pipeline. It simulates a live stream of social media posts discussing the **2025 Philippine Elections**, ingests them through Apache Kafka, processes them using PySpark Structured Streaming, stores them in a Delta Lake Medallion architecture (Bronze ➔ Silver ➔ Gold), and surfaces real-time metrics in a Databricks Lakeview dashboard.
 
 ### Key Project Metrics & Highlights:
-- **Simulated Ingestion Rate:** Ingested a dataset of ~217,000 posts with throughput reaching ~3,000 messages/sec into Kafka.
-- **Partitioned Topic:** Streamed across 3 Kafka partitions using a round-robin producer with dynamic timestamps.
-- **Medallion Layers:** Built 3 progressive Delta Lake tables with stateful deduplication, schema validation, and aggregations.
-- **Orchestration:** Chained ingestion and transformation tasks into an automated 3-stage Databricks Workflow job.
+- **Streaming Volume:** Processed **640,000+ election posts** and analyzed **27.9M+ engagement points** in real time.
+- **Top Trending Topics:** Detected leading election hashtags dynamically, led by **`#halalan2025`** (439,000+ posts) and **`#eleksyon2025`**.
+- **Distributed Ingestion:** Streamed across Kafka partitions with dynamic UTC timestamps and sentiment estimation.
+- **Medallion Architecture:** Built 3 progressive Delta Lake tables with watermarking, stateful deduplication, and business aggregations.
+
+---
+
+### 📊 Live Executive Dashboard (Databricks Lakeview)
+
+![Real-Time Philippine Election Social Media Intelligence Dashboard](assets/databricks_dashboard_interactive.png)
 
 ---
 
@@ -107,14 +113,18 @@ flowchart TD
 ## 5. Repository Structure
 
 ```text
+├── assets/                             # Real-time dashboard screenshots and architecture assets
+│   ├── databricks_dashboard_interactive.png
+│   └── databricks_lakehouse_dashboard.png
 ├── dashboard/                          # Databricks SQL Queries for Lakeview
 │   └── queries.sql                     # Aggregation queries for dashboard charts
 ├── databricks/                         # PySpark Lakehouse Notebooks
 │   ├── 01_kafka_bronze_ingest.py       # Ingests raw Kafka stream into Delta Bronze
 │   ├── 02_silver_transformations.py    # Schema enforcement, DLQ & deduplication
 │   └── 03_gold_aggregations.py         # Business aggregations for Gold tables
-├── infra/                              # AWS Cloud Setup Scripts
+├── infra/                              # AWS Cloud Setup & Stream Scripts
 │   ├── 01_aws_infra_setup.sh           # VPC, Subnet, EC2, and Security Group setup
+│   ├── start_lakehouse_stream.sh       # Automated EC2 streaming restart script
 │   └── teardown.sh                     # Cleanup script to terminate resources
 ├── kubernetes/                         # Kubernetes Manifests
 │   ├── kafka/                          # Kafka & Zookeeper deployments and service
