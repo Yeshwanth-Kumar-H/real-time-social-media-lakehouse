@@ -49,7 +49,7 @@ s.close()
 # messages efficiently and commits offsets with complete state guarantee.
 
 KAFKA_BOOTSTRAP_SERVERS = f"{BROKER_IP}:{BROKER_PORT}"
-KAFKA_TOPIC = "twitter"  # Dual-published topic; 'social-media-posts' is also available
+KAFKA_TOPIC = "social-media-posts"
 
 print(f"📡 Connecting to Kafka Broker: {KAFKA_BOOTSTRAP_SERVERS}")
 print(f"📋 Reading Topic: {KAFKA_TOPIC}")
@@ -91,10 +91,23 @@ bronze_query.awaitTermination()
 print("✅ Bronze Ingestion Complete! Data safely committed to 'bronze_social_media_raw'.")
 
 # COMMAND ----------
-# 4. Verify Bronze Record Count
+# 4. Verify Bronze Record Count (Python or %sql)
+# Option A: PySpark
 total_records = spark.table("bronze_social_media_raw").count()
 print(f"📊 Total Records in 'bronze_social_media_raw': {total_records:,}")
 
+# Option B: Run in a SQL cell:
+# %sql
+# SELECT COUNT(*) AS total_records FROM bronze_social_media_raw;
+
 # COMMAND ----------
-# 5. Preview Raw Bronze Records
+# 5. Preview Raw Bronze Records (Python or %sql)
+# Option A: PySpark
 display(spark.table("bronze_social_media_raw").orderBy(col("_ingest_timestamp").desc()).limit(10))
+
+# Option B: Run in a SQL cell:
+# %sql
+# SELECT kafka_topic, kafka_partition, kafka_offset, _ingest_timestamp, raw_payload
+# FROM bronze_social_media_raw
+# ORDER BY _ingest_timestamp DESC
+# LIMIT 10;
