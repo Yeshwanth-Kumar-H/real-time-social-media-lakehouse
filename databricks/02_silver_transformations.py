@@ -12,7 +12,6 @@
 
 # COMMAND ----------
 # 1. Environment & Unity Catalog Volume Checkpoint Setup
-from pyspark.sql import SparkSession
 from pyspark.sql.types import (
     StructType, StructField, StringType, DoubleType,
     LongType, BooleanType, ArrayType
@@ -20,9 +19,6 @@ from pyspark.sql.types import (
 from pyspark.sql.functions import (
     col, from_json, to_timestamp, when, current_timestamp
 )
-
-spark = SparkSession.builder.appName("SocialMedia-Silver-Transformations").getOrCreate()
-spark.sparkContext.setLogLevel("WARN")
 
 curr_cat = spark.catalog.currentCatalog()
 curr_sch = spark.catalog.currentDatabase()

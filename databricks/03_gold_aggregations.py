@@ -7,13 +7,9 @@
 
 # COMMAND ----------
 # 1. Environment & Read from Cleansed Silver Delta Table
-from pyspark.sql import SparkSession
 from pyspark.sql.functions import (
     col, explode, count, avg, sum as _sum, round as _round
 )
-
-spark = SparkSession.builder.appName("SocialMedia-Gold-Aggregations").getOrCreate()
-spark.sparkContext.setLogLevel("WARN")
 
 silver_df = spark.table("silver_social_media_posts")
 print(f"📊 Reading from 'silver_social_media_posts' ({silver_df.count():,} rows)")
