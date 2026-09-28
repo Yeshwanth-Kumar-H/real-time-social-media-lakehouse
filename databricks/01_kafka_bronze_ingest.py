@@ -23,9 +23,9 @@ print(f"✅ Governed Checkpoint Volume is ready at: {CHECKPOINT_BRONZE}")
 
 # COMMAND ----------
 # 2. Network Connectivity Validation (Broker Socket Test)
-import socket
-
-BROKER_IP = "40.192.105.29"
+# Replace <YOUR_EC2_PUBLIC_IP> with your EC2 instance's public IPv4 address,
+# or pass it dynamically via spark.conf.set("pipeline.kafka.broker", "<IP>")
+BROKER_IP = spark.conf.get("pipeline.kafka.broker", "<YOUR_EC2_PUBLIC_IP>")
 BROKER_PORT = 30094
 
 s = socket.socket()
