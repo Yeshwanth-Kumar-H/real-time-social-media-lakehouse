@@ -34,7 +34,7 @@ gold_hashtags_df = (
 )
 
 # Persist to Gold Delta Table
-gold_hashtags_df.write.format("delta").mode("overwrite").saveAsTable("gold_trending_hashtags")
+gold_hashtags_df.write.format("delta").mode("overwrite").option("overwriteSchema", "true").saveAsTable("gold_trending_hashtags")
 print("✅ Gold Table 1 'gold_trending_hashtags' Created / Updated!")
 
 # COMMAND ----------
@@ -53,7 +53,7 @@ gold_users_df = (
 )
 
 # Persist to Gold Delta Table
-gold_users_df.write.format("delta").mode("overwrite").saveAsTable("gold_active_users")
+gold_users_df.write.format("delta").mode("overwrite").option("overwriteSchema", "true").saveAsTable("gold_active_users")
 print("✅ Gold Table 2 'gold_active_users' Created / Updated!")
 
 # COMMAND ----------
